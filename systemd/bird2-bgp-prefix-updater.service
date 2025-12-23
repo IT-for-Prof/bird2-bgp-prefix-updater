@@ -1,0 +1,15 @@
+[Unit]
+Description=BIRD2 BGP Prefix Updater
+After=network.target bird.service
+
+[Service]
+Type=oneshot
+Environment="RIPESTAT_URL=https://stat.ripe.net/data/country-resource-list/data.json?resource=ru"
+ExecStart=/usr/bin/python3 /usr/local/bin/prefix_updater.py
+User=root
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+

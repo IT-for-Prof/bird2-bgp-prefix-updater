@@ -1,0 +1,11 @@
+[Unit]
+Description=Run BIRD2 BGP Prefix Updater daily
+
+[Timer]
+OnCalendar=03:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
