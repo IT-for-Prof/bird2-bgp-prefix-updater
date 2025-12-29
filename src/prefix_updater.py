@@ -31,49 +31,42 @@ SOURCES = [
         "format": "json"
     },
     {
-        "name": "other_services",
+        "name": "antifilter_ipsum",
         "urls": [
-            "https://core.telegram.org/resources/cidr.txt",
-            "https://www.cloudflare.com/ips-v4",
-            "https://www.gstatic.com/ipranges/goog.txt",
-            "https://openai.com/chatgpt-user-ranges.txt"
+            "https://antifilter.network/download/ipsum.lst",
+            "https://antifilter.download/list/ipsum.lst"
         ],
-        "community_suffix": 107,
-        "format": "text"
-    },
-    {
-        "name": "ipsum_af_network",
-        "url": "https://antifilter.network/download/ipsum.lst",
         "community_suffix": 101,
         "format": "text"
     },
     {
-        "name": "ipsum_af_download",
-        "url": "https://antifilter.download/list/ipsum.lst",
-        "community_suffix": 101,
-        "format": "text"
-    },
-    {
-        "name": "rkn_subnets_af_network",
-        "url": "https://antifilter.network/download/subnet.lst",
+        "name": "antifilter_subnets",
+        "urls": [
+            "https://antifilter.network/download/subnet.lst",
+            "https://antifilter.download/list/subnet.lst"
+        ],
         "community_suffix": 102,
-        "format": "text"
-    },
-    {
-        "name": "rkn_subnets_af_download",
-        "url": "https://antifilter.download/list/subnet.lst",
-        "community_suffix": 102,
-        "format": "text"
-    },
-    {
-        "name": "custom_af_network",
-        "url": "https://antifilter.network/downloads/custom.lst",
-        "community_suffix": 104,
         "format": "text"
     },
     {
         "name": "gov_networks",
         "url": "https://antifilter.network/download/govno.lst",
+        "community_suffix": 103,
+        "format": "text"
+    },
+    {
+        "name": "official_services",
+        "urls": [
+            "https://core.telegram.org/resources/cidr.txt",
+            "https://www.cloudflare.com/ips-v4",
+            "https://www.gstatic.com/ipranges/goog.txt"
+        ],
+        "community_suffix": 104,
+        "format": "text"
+    },
+    {
+        "name": "custom_user_lists",
+        "url": "https://antifilter.network/downloads/custom.lst",
         "community_suffix": 105,
         "format": "text"
     }

@@ -91,13 +91,33 @@ systemctl daemon-reload
 systemctl restart bird2-bgp-prefix-updater.service
 ```
 
-## Client Configuration Examples
+## BGP Communities
+Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 
-### BIRD2
+| ID | Name | Description |
+| :--- | :--- | :--- |
+| **100** | **RU Mainland** | All IPv4 networks of Russia (RIPEstat) |
+| **101** | **AF Ipsum** | Antifilter's single IPs summarized by /24 |
+| **102** | **AF Subnets** | Subnets from Antifilter's official lists |
+| **103** | **Gov Networks** | Networks of government structures and agencies |
+| **104** | **Official Services** | **Telegram, Cloudflare, Google** (and other official lists) |
+| **105** | **Custom/User** | Custom user lists and manual settings |
+
+## Filtering Examples (BIRD2)
+
+### Only Russia (community 100)
 ```bird
-protocol bgp rs from t_client {
-    neighbor 192.0.2.1 as 65001;
-    # password "md5secret";
+filter export_only_ru {
+    if (MY_AS, 100) ~ bgp_community then accept;
+    reject;
+}
+```
+
+### All special networks (range 101-105)
+```bird
+filter export_special_only {
+    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
+    reject;
 }
 ```
 
