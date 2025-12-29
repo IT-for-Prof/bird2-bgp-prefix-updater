@@ -30,6 +30,18 @@ SOURCES = [
         "format": "json"
     },
     {
+        "name": "ipsum_af_network",
+        "url": "https://antifilter.network/download/ipsum.lst",
+        "community_suffix": 101,
+        "format": "text"
+    },
+    {
+        "name": "ipsum_af_download",
+        "url": "https://antifilter.download/list/ipsum.lst",
+        "community_suffix": 101,
+        "format": "text"
+    },
+    {
         "name": "rkn_subnets_af_network",
         "url": "https://antifilter.network/download/subnet.lst",
         "community_suffix": 102,

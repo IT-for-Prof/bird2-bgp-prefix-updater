@@ -25,6 +25,13 @@
   - `/etc/bird/prefixes.bird` — сгенерированный файл маршрутов с community.
   - `/var/lib/bird/prefixes.txt` — чистый список CIDR (для отладки).
 
+## Быстрый старт (через git clone)
+```bash
+cd /opt/
+git clone https://github.com/IT-for-Prof/bird2-bgp-prefix-updater.git
+cd bird2-bgp-prefix-updater
+```
+
 ## Установка и размещение файлов
 
 1. **Разместите файлы проекта:**
@@ -67,7 +74,7 @@
 | ID | Название | Описание |
 | :--- | :--- | :--- |
 | **100** | **RU Combined** | Объединенный список RU (RIPEstat + ip2location) |
-| **101** | **Blocked Base** | Базовые заблокированные подсети (antifilter.txt) |
+| **101** | **Blocked Base** | Заблокированные подсети и суммаризация ipsum.lst (/24) |
 | **102** | **RKN Subnets** | Подсети РКН (из двух независимых источников) |
 | **104** | **Custom/User** | Пользовательские списки (custom.lst + user.txt) |
 | **105** | **Gov Networks** | Сети государственных структур (govno.lst) |
@@ -91,5 +98,16 @@ if (bgp-communities includes 64888:100) {
 - **Статус BGP**: `birdc show protocols`
 - **Проверка community у маршрута**: `birdc "show route table t_bgp_prefixes all"`
 - **Логи обновления**: `journalctl -u bird2-bgp-prefix-updater.service -f`
+
+## Обновление проекта
+Если вы хотите обновить скрипт до последней версии из репозитория:
+```bash
+cd /opt/bird2-bgp-prefix-updater
+git pull
+# Переустановите скрипт и юнит (если были изменения)
+install -m755 src/prefix_updater.py /usr/local/bin/prefix_updater.py
+systemctl daemon-reload
+systemctl restart bird2-bgp-prefix-updater.service
+```
 
 itforprof.com by Konstantin Tyutyunnik
