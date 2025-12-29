@@ -13,11 +13,14 @@ import math
 import time
 from typing import List, Tuple, Dict, Set
 
+VERSION = "2.3.0"
+
 # Configuration
 LOCAL_AS = int(os.environ.get('LOCAL_AS', '64888'))
 OUTPUT_TXT = os.environ.get('OUTPUT_TXT', "/var/lib/bird/prefixes.txt")
 OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.0; +itforprof.com)'
+BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
+USER_AGENT = f'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/{VERSION}; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -181,7 +184,47 @@ def download_resource(source: Dict) -> List[str]:
     return []
 
 
+def smoke_test_bird(temp_bird_file: str) -> bool:
+    if not os.path.exists(BIRD_CONF):
+        print(f"Warning: {BIRD_CONF} not found, skipping smoke test.")
+        return True
+
+    check_conf = BIRD_CONF + ".check"
+    try:
+        with open(BIRD_CONF, 'r', encoding='utf-8') as f:
+            conf_data = f.read()
+
+        new_include = f'include "{temp_bird_file}";'
+        old_include_pattern = f'include "{OUTPUT_BIRD}";'
+
+        if old_include_pattern not in conf_data:
+            print(f"Warning: Could not find '{old_include_pattern}' in {BIRD_CONF}. Smoke test might be inaccurate.")
+
+        check_conf_data = conf_data.replace(old_include_pattern, new_include)
+
+        with open(check_conf, 'w', encoding='utf-8') as f:
+            f.write(check_conf_data)
+
+        # bird -p -c returns 0 on success
+        res = os.system(f"bird -p -c {check_conf}")
+        return res == 0
+    except Exception as e:
+        print(f"Smoke test error: {e}")
+        return False
+    finally:
+        if os.path.exists(check_conf):
+            try:
+                os.remove(check_conf)
+            except Exception:
+                pass
+
+
 def main() -> None:
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ["--version", "-v"]:
+            print(f"BIRD2-BGP-Prefix-Updater version {VERSION}")
+            sys.exit(0)
+
     all_routes: Dict[str, Set[int]] = {}  # CIDR -> set of community suffixes
 
     for src in SOURCES:
@@ -218,10 +261,20 @@ def main() -> None:
     bird_lines = []
     for cidr in sorted_cidrs:
         comms = sorted(list(all_routes[cidr]))
-        comm_str = ", ".join([f"({LOCAL_AS}, {suffix})" for suffix in comms])
-        bird_lines.append(f"route {cidr} blackhole {{ bgp_community.add([{comm_str}]); }};")
+        # Correct format: bgp_community.add((ASN, VALUE));
+        # If multiple: { bgp_community.add((ASN, V1)); bgp_community.add((ASN, V2)); }
+        adds = [f"bgp_community.add(({LOCAL_AS}, {suffix}));" for suffix in comms]
+        bird_lines.append(f"route {cidr} blackhole {{ {' '.join(adds)} }};")
 
     bird_content = "\n".join(bird_lines)
+
+    # Self-check
+    if "bgp_community.add([(" in bird_content:
+        print("Error: Invalid community format detected (found 'bgp_community.add([(').")
+        invalid = [l for l in bird_lines if "bgp_community.add([(" in l]
+        for l in invalid[:5]:
+            print(f"  Invalid line: {l}")
+        sys.exit(1)
 
     new_hash = hashlib.sha256(bird_content.encode()).hexdigest()
     old_hash = ""
@@ -233,12 +286,32 @@ def main() -> None:
         print(f"No changes. Total routes: {len(all_routes)}")
         return
 
+    # Atomic write for TXT
     atomic_write(OUTPUT_TXT, txt_content)
-    atomic_write(OUTPUT_BIRD, bird_content)
-    print(f"Updated. Total routes: {len(all_routes)}, Hash: {new_hash[:8]}")
 
-    if os.system("birdc configure") != 0:
-        print("Warning: birdc configure failed. Is BIRD running?")
+    # Atomic write with smoke test for BIRD
+    temp_bird = OUTPUT_BIRD + ".tmp"
+    os.makedirs(os.path.dirname(OUTPUT_BIRD), exist_ok=True)
+    with open(temp_bird, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(bird_content)
+        f.flush()
+        os.fsync(f.fileno())
+
+    print("Running smoke test...")
+    if smoke_test_bird(temp_bird):
+        if os.name == 'nt' and os.path.exists(OUTPUT_BIRD):
+            os.remove(OUTPUT_BIRD)
+        os.rename(temp_bird, OUTPUT_BIRD)
+        print(f"Updated. Total routes: {len(all_routes)}, Hash: {new_hash[:8]}")
+        
+        # Reload BIRD
+        if os.system("birdc configure") != 0:
+            print("Warning: birdc configure failed. Is BIRD running?")
+    else:
+        print("Error: Smoke test failed. New configuration is invalid. Keeping old file.")
+        if os.path.exists(temp_bird):
+            os.remove(temp_bird)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

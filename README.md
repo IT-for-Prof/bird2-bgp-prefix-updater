@@ -1,4 +1,4 @@
-# BIRD2-BGP-Prefix-Updater (Multi-Source Aggregator)
+# BGP-Prefix-Updater (Multi-Source Aggregator) v2.3.0
 
 Автоматический агрегатор BGP-префиксов из нескольких источников (RIPEstat, Antifilter.network, Antifilter.download) с поддержкой BGP Community и автоматической оптимизацией (collapse).
 
@@ -78,6 +78,31 @@ cd bird2-bgp-prefix-updater
 | **102** | **RKN Subnets** | Подсети РКН (из двух независимых источников) |
 | **104** | **Custom/User** | Пользовательские списки (custom.lst + user.txt) |
 | **105** | **Gov Networks** | Сети государственных структур (govno.lst) |
+
+## Примеры фильтрации (BIRD2)
+
+Вы можете использовать эти community для гибкой отдачи маршрутов разным клиентам. Примеры фильтров в `bird.conf`:
+
+### Моно-фильтр (только один тип)
+Отдавать только российские сети (community 100):
+```bird
+filter export_only_ru {
+    if (MY_AS, 100) ~ bgp_community then accept;
+    reject;
+}
+```
+
+### Мульти-фильтр (несколько типов)
+Безопасный способ проверки нескольких community (индивидуальные проверки):
+```bird
+filter export_blocked_only {
+    if (MY_AS, 101) ~ bgp_community then accept;
+    if (MY_AS, 102) ~ bgp_community then accept;
+    if (MY_AS, 104) ~ bgp_community then accept;
+    if (MY_AS, 105) ~ bgp_community then accept;
+    reject;
+}
+```
 
 ## Примеры настройки клиентов (Mikrotik / WinBox)
 В Routing -> Filters создайте правила на основе полученных community:
