@@ -1,6 +1,13 @@
 # BIRD2-BGP-Prefix-Updater (EN)
 
-Automates downloading, validating, and serving BGP prefixes from RIPEstat using BIRD2. Works with any country by changing `RIPESTAT_URL`.
+Automates downloading, validating, and serving BGP prefixes from RIPEstat and various other sources (Antifilter, official service lists) using BIRD2.
+
+## Features
+- **Multi-Source**: Supports JSON (RIPEstat) and plain text (CIDR) lists.
+- **Group Sources**: Easily aggregate multiple URLs (e.g., Telegram, Cloudflare) into a single BGP Community.
+- **Auto-Collapse**: Automatically merges adjacent subnets to optimize route table size.
+- **Atomic Updates**: Safe file writes with smoke testing before reloading BIRD.
+- **IPv6 Safety**: Automatically ignores IPv6 for IPv4-only configurations.
 
 ## Requirements
 - Linux (Debian/Ubuntu or RHEL/Alma/CentOS)
