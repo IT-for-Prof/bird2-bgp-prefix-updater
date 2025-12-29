@@ -100,8 +100,8 @@ Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 | **101** | **AF Ipsum** | Antifilter's single IPs summarized by /24 |
 | **102** | **AF Subnets** | Subnets from Antifilter's official lists |
 | **103** | **Gov Networks** | Networks of government structures and agencies |
-| **104** | **Official Services** | **Telegram, Cloudflare, Google** (and other official lists) |
-| **105** | **Custom/User** | Custom user lists and manual settings |
+| **104** | **Custom Lists** | **Telegram, Cloudflare, Google** and Antifilter's `custom.lst` |
+| **105** | **Reserved** | Reserved for future use |
 
 ## Filtering Examples (BIRD2)
 
@@ -113,10 +113,10 @@ filter export_only_ru {
 }
 ```
 
-### All special networks (range 101-105)
+### All special networks (range 101-104)
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..104)]) then accept;
     reject;
 }
 ```

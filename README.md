@@ -77,8 +77,8 @@ cd bird2-bgp-prefix-updater
 | **101** | **AF Ipsum** | Суммаризация отдельных IP Antifilter по маске /24 |
 | **102** | **AF Subnets** | Подсети из официальных списков Antifilter |
 | **103** | **Gov Networks** | Сети государственных структур и ведомств |
-| **104** | **Official Services** | **Telegram, Cloudflare, Google** (и другие официальные списки) |
-| **105** | **Custom/User** | Пользовательские списки и ручные настройки |
+| **104** | **Custom Lists** | **Telegram, Cloudflare, Google** и `custom.lst` Antifilter |
+| **105** | **Reserved** | Зарезервировано для будущих нужд |
 
 ## Примеры фильтрации (BIRD2)
 
@@ -94,10 +94,10 @@ filter export_only_ru {
 ```
 
 ### Мульти-фильтр (диапазон)
-Элегантный способ разрешить все спец-сети (101-105) одной строкой:
+Элегантный способ разрешить все спец-сети (101-104) одной строкой:
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..104)]) then accept;
     reject;
 }
 ```
