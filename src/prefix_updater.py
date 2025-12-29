@@ -13,14 +13,12 @@ import math
 import time
 from typing import List, Tuple, Dict, Set
 
-VERSION = "2.3.0"
-
 # Configuration
 LOCAL_AS = int(os.environ.get('LOCAL_AS', '64888'))
 OUTPUT_TXT = os.environ.get('OUTPUT_TXT', "/var/lib/bird/prefixes.txt")
 OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
-USER_AGENT = f'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/{VERSION}; +itforprof.com)'
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.2; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -31,6 +29,17 @@ SOURCES = [
         "url": "https://stat.ripe.net/data/country-resource-list/data.json?resource=ru",
         "community_suffix": 100,
         "format": "json"
+    },
+    {
+        "name": "other_services",
+        "urls": [
+            "https://core.telegram.org/resources/cidr.txt",
+            "https://www.cloudflare.com/ips-v4",
+            "https://www.gstatic.com/ipranges/goog.txt",
+            "https://openai.com/chatgpt-user-ranges.txt"
+        ],
+        "community_suffix": 107,
+        "format": "text"
     },
     {
         "name": "ipsum_af_network",
@@ -220,17 +229,21 @@ def smoke_test_bird(temp_bird_file: str) -> bool:
 
 
 def main() -> None:
-    if len(sys.argv) > 1:
-        if sys.argv[1] in ["--version", "-v"]:
-            print(f"BIRD2-BGP-Prefix-Updater version {VERSION}")
-            sys.exit(0)
-
     all_routes: Dict[str, Set[int]] = {}  # CIDR -> set of community suffixes
 
     for src in SOURCES:
-        prefixes = download_resource(src)
+        urls = src.get('urls', [src.get('url')])
+        all_src_prefixes = []
+        for url in urls:
+            if not url:
+                continue
+            # Create a shallow copy to safely update the URL for the download function
+            temp_src = src.copy()
+            temp_src['url'] = url
+            all_src_prefixes.extend(download_resource(temp_src))
+
         processed: List[str] = []
-        for item in prefixes:
+        for item in all_src_prefixes:
             item = item.strip()
             if not item:
                 continue
