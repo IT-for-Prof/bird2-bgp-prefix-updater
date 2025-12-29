@@ -67,7 +67,7 @@ SOURCES = [
     {
         "name": "custom_user_lists",
         "url": "https://antifilter.network/downloads/custom.lst",
-        "community_suffix": 105,
+        "community_suffix": 104,
         "format": "text"
     }
 ]
