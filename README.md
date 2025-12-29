@@ -1,4 +1,4 @@
-# BGP-Prefix-Updater (Multi-Source Aggregator) v2.3.0
+# BIRD2-BGP-Prefix-Updater (Multi-Source Aggregator)
 
 Автоматический агрегатор BGP-префиксов из нескольких источников (RIPEstat, Antifilter.network, Antifilter.download) с поддержкой BGP Community и автоматической оптимизацией (collapse).
 
@@ -78,6 +78,7 @@ cd bird2-bgp-prefix-updater
 | **102** | **RKN Subnets** | Подсети РКН (из двух независимых источников) |
 | **104** | **Custom/User** | Пользовательские списки (custom.lst + user.txt) |
 | **105** | **Gov Networks** | Сети государственных структур (govno.lst) |
+| **107** | **Other Services** | Официальные списки (Telegram, Cloudflare, Google, OpenAI) |
 
 ## Примеры фильтрации (BIRD2)
 
