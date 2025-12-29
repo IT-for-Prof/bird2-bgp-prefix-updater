@@ -73,12 +73,12 @@ cd bird2-bgp-prefix-updater
 
 | ID | Название | Описание |
 | :--- | :--- | :--- |
-| **100** | **RU Combined** | Объединенный список RU (RIPEstat + ip2location) |
-| **101** | **Blocked Base** | Заблокированные подсети и суммаризация ipsum.lst (/24) |
-| **102** | **RKN Subnets** | Подсети РКН (из двух независимых источников) |
-| **104** | **Custom/User** | Пользовательские списки (custom.lst + user.txt) |
-| **105** | **Gov Networks** | Сети государственных структур (govno.lst) |
-| **107** | **Other Services** | Официальные списки (Telegram, Cloudflare, Google, OpenAI) |
+| **100** | **RU Mainland** | Все IPv4 сети РФ (из RIPEstat) |
+| **101** | **AF Ipsum** | Суммаризация отдельных IP Antifilter по маске /24 |
+| **102** | **AF Subnets** | Подсети из официальных списков Antifilter |
+| **103** | **Gov Networks** | Сети государственных структур и ведомств |
+| **104** | **Official Services** | **Telegram, Cloudflare, Google** (и другие официальные списки) |
+| **105** | **Custom/User** | Пользовательские списки и ручные настройки |
 
 ## Примеры фильтрации (BIRD2)
 
@@ -93,14 +93,11 @@ filter export_only_ru {
 }
 ```
 
-### Мульти-фильтр (несколько типов)
-Безопасный способ проверки нескольких community (индивидуальные проверки):
+### Мульти-фильтр (диапазон)
+Элегантный способ разрешить все спец-сети (101-105) одной строкой:
 ```bird
-filter export_blocked_only {
-    if (MY_AS, 101) ~ bgp_community then accept;
-    if (MY_AS, 102) ~ bgp_community then accept;
-    if (MY_AS, 104) ~ bgp_community then accept;
-    if (MY_AS, 105) ~ bgp_community then accept;
+filter export_special_only {
+    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
     reject;
 }
 ```
