@@ -11,16 +11,49 @@ import sys
 import hashlib
 import math
 import time
-from typing import List, Tuple, Dict
-
+from typing import List, Tuple, Dict, Set
 
 # Configuration
-URL = os.environ.get('RIPESTAT_URL', 'https://stat.ripe.net/data/country-resource-list/data.json?resource=ru')
-OUTPUT_TXT = "/var/lib/bird/prefixes.txt"
-OUTPUT_BIRD = "/etc/bird/prefixes.bird"
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/1.0; +itforprof.com)'
+LOCAL_AS = int(os.environ.get('LOCAL_AS', '64888'))
+OUTPUT_TXT = os.environ.get('OUTPUT_TXT', "/var/lib/bird/prefixes.txt")
+OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.0; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
+
+# Data Sources (Verified working URLs)
+SOURCES = [
+    {
+        "name": "ru_ripe",
+        "url": "https://stat.ripe.net/data/country-resource-list/data.json?resource=ru",
+        "community_suffix": 100,
+        "format": "json"
+    },
+    {
+        "name": "rkn_subnets_af_network",
+        "url": "https://antifilter.network/download/subnet.lst",
+        "community_suffix": 102,
+        "format": "text"
+    },
+    {
+        "name": "rkn_subnets_af_download",
+        "url": "https://antifilter.download/list/subnet.lst",
+        "community_suffix": 102,
+        "format": "text"
+    },
+    {
+        "name": "custom_af_network",
+        "url": "https://antifilter.network/downloads/custom.lst",
+        "community_suffix": 104,
+        "format": "text"
+    },
+    {
+        "name": "gov_networks",
+        "url": "https://antifilter.network/download/govno.lst",
+        "community_suffix": 105,
+        "format": "text"
+    }
+]
 
 
 def ip_to_int(ip: str) -> int:
@@ -32,6 +65,8 @@ def int_to_ip(n: int) -> str:
 
 
 def cidr_to_range(cidr: str) -> Tuple[int, int]:
+    if '/' not in cidr:
+        cidr = f"{cidr}/32"
     ip, prefix = cidr.split('/')
     prefix = int(prefix)
     start = ip_to_int(ip)
@@ -53,7 +88,7 @@ def range_to_cidrs(start: int, end: int) -> List[str]:
                 temp_start //= 2
             max_size = trailing_zeros
         range_len = end - start + 1
-        max_from_len = int(math.log2(range_len))
+        max_from_len = int(math.log2(range_len)) if range_len > 0 else 0
         prefix_len = 32 - min(max_size, max_from_len)
         cidrs.append(f"{int_to_ip(start)}/{prefix_len}")
         start += (1 << (32 - prefix_len))
@@ -90,10 +125,10 @@ def collapse_networks(networks: List[str]) -> List[str]:
 def validate_cidr(cidr: str) -> bool:
     try:
         if '/' not in cidr:
-            return False
+            cidr = f"{cidr}/32"
         ip, pfx = cidr.split('/')
         pfx = int(pfx)
-        if not (8 <= pfx <= 32):
+        if not (0 <= pfx <= 32):
             return False
         socket.inet_aton(ip)
         return True
@@ -104,42 +139,43 @@ def validate_cidr(cidr: str) -> bool:
 def atomic_write(filename: str, content: str) -> None:
     tmp = filename + ".tmp"
     os.makedirs(os.path.dirname(filename), exist_ok=True)
-    with open(tmp, 'w', encoding='utf-8') as f:
+    with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write(content)
         f.flush()
         os.fsync(f.fileno())
+    if os.name == 'nt' and os.path.exists(filename):
+        os.remove(filename)
     os.rename(tmp, filename)
 
 
-def download_data() -> Dict:
-    data = None
+def download_resource(source: Dict) -> List[str]:
+    print(f"Downloading {source['name']} from {source['url']}...")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(URL, headers={'User-Agent': USER_AGENT})
+            req = urllib.request.Request(source['url'], headers={'User-Agent': USER_AGENT})
             with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                break
-        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError, ConnectionRefusedError) as e:
+                raw_data = response.read().decode('utf-8')
+                if source['format'] == 'json':
+                    data = json.loads(raw_data)
+                    return data.get('data', {}).get('resources', {}).get('ipv4', [])
+                else:
+                    return [line.strip() for line in raw_data.splitlines() if line.strip() and not line.startswith('#')]
+        except Exception as e:
             if attempt == MAX_RETRIES:
-                print(f"Error: All {MAX_RETRIES} attempts failed. Last error: {e}")
-                sys.exit(1)
-            print(f"Attempt {attempt} failed: {e}. Retrying in {RETRY_DELAY}s...")
+                print(f"Error: Failed to download {source['name']} after {MAX_RETRIES} attempts: {e}")
+                return []
+            print(f"Attempt {attempt} failed for {source['name']}: {e}. Retrying...")
             time.sleep(RETRY_DELAY)
-    if data is None:
-        print("Error: No data retrieved.")
-        sys.exit(1)
-    return data
+    return []
 
 
 def main() -> None:
-    print(f"Starting update from {URL}")
-    data = download_data()
-    try:
-        raw_ips = data.get('data', {}).get('resources', {}).get('ipv4', [])
-        print(f"Fetched {len(raw_ips)} raw items")
+    all_routes: Dict[str, Set[int]] = {}  # CIDR -> set of community suffixes
 
+    for src in SOURCES:
+        prefixes = download_resource(src)
         processed: List[str] = []
-        for item in raw_ips:
+        for item in prefixes:
             item = item.strip()
             if not item:
                 continue
@@ -150,46 +186,48 @@ def main() -> None:
                 except Exception:
                     continue
             else:
-                processed.append(item)
+                processed.append(item if '/' in item else f"{item}/32")
 
-        valid = [ip for ip in processed if validate_cidr(ip)]
-        final = collapse_networks(valid)
+        valid = [p for p in processed if validate_cidr(p)]
+        collapsed = collapse_networks(valid)
 
-        if not final:
-            print("Error: No prefixes found after validation.")
-            sys.exit(1)
+        for p in collapsed:
+            if p not in all_routes:
+                all_routes[p] = set()
+            all_routes[p].add(src['community_suffix'])
 
-        txt_content = "\n".join(final)
-        bird_content = "\n".join([f"route {ip} blackhole;" for ip in final])
-
-        new_hash = hashlib.sha256(txt_content.encode()).hexdigest()
-        old_hash = ""
-        old_prefixes = set()
-        if os.path.exists(OUTPUT_TXT):
-            with open(OUTPUT_TXT, 'r', encoding='utf-8') as f:
-                content = f.read()
-                old_hash = hashlib.sha256(content.encode()).hexdigest()
-                old_prefixes = set(line.strip() for line in content.splitlines() if line.strip())
-
-        if new_hash == old_hash:
-            print(f"No changes. Total: {len(final)}")
-            return
-
-        added = len(set(final) - old_prefixes)
-        removed = len(old_prefixes - set(final))
-
-        atomic_write(OUTPUT_TXT, txt_content)
-        atomic_write(OUTPUT_BIRD, bird_content)
-        print(f"Updated. Total: {len(final)} (Added: {added}, Removed: {removed}), Hash: {new_hash[:8]}")
-
-        if os.system("birdc configure") != 0:
-            print("Warning: birdc configure failed. Is BIRD running?")
-
-    except Exception as e:
-        print(f"Critical Error during processing: {e}")
+    if not all_routes:
+        print("Error: No prefixes collected from any source.")
         sys.exit(1)
+
+    sorted_cidrs = sorted(all_routes.keys(), key=lambda x: (ip_to_int(x.split('/')[0]), int(x.split('/')[1])))
+
+    txt_content = "\n".join(sorted_cidrs)
+    bird_lines = []
+    for cidr in sorted_cidrs:
+        comms = sorted(list(all_routes[cidr]))
+        comm_str = ", ".join([f"({LOCAL_AS}, {suffix})" for suffix in comms])
+        bird_lines.append(f"route {cidr} blackhole {{ bgp_community.add([{comm_str}]); }};")
+
+    bird_content = "\n".join(bird_lines)
+
+    new_hash = hashlib.sha256(bird_content.encode()).hexdigest()
+    old_hash = ""
+    if os.path.exists(OUTPUT_BIRD):
+        with open(OUTPUT_BIRD, 'r', encoding='utf-8') as f:
+            old_hash = hashlib.sha256(f.read().encode()).hexdigest()
+
+    if new_hash == old_hash:
+        print(f"No changes. Total routes: {len(all_routes)}")
+        return
+
+    atomic_write(OUTPUT_TXT, txt_content)
+    atomic_write(OUTPUT_BIRD, bird_content)
+    print(f"Updated. Total routes: {len(all_routes)}, Hash: {new_hash[:8]}")
+
+    if os.system("birdc configure") != 0:
+        print("Warning: birdc configure failed. Is BIRD running?")
 
 
 if __name__ == "__main__":
     main()
-

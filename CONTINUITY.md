@@ -1,46 +1,42 @@
 # Continuity Ledger
 
 ## Goal
-Сборка и развертывание универсального BGP route-server (BIRD v2/v3) с автоматическим обновлением IPv4 префиксов из RIPEstat (любой регион) и раздачей их клиентам.
+Сборка и развертывание универсального BGP route-server (BIRD v2/v3) с автоматической агрегацией IPv4 префиксов из множества источников (RIPEstat, Antifilter) и раздачей их клиентам с использованием BGP Community.
 
 ## Constraints/Assumptions
 - ОС: Linux (AlmaLinux, Debian, etc.).
 - Демон: BIRD v2/v3.
 - Язык: Python 3.6+ (stdlib + typing для совместимости).
-- Обновление: 1 раз в сутки через systemd timer.
+- Обновление: через systemd timer.
 - Атомарность: Обновление файлов через tmp + rename.
 
 ## Key decisions
-- Протокол `static` BIRD читает `/etc/bird/prefixes.bird` в таблицу `t_bgp_prefixes`.
-- Маршруты устанавливаются как `blackhole`, чтобы сервер не стал транзитным.
-- Python-скрипт `prefix_updater.py` (stdlib) с retry, collapse и atomic write.
-- Универсальный `RIPESTAT_URL` задается через переменную окружения в systemd unit.
-- Конфигурация BIRD содержит плейсхолдеры `${ROUTER_ID}` и `${LOCAL_AS}`, которые должны быть заменены пользователем ПЕРЕД запуском.
-- Скрипт `prefix_updater.py` следует запустить вручную один раз перед стартом BIRD для генерации `prefixes.bird`.
-- Использование модуля `typing` для обеспечения совместимости с версиями Python ниже 3.9.
+- Переход на мульти-источники (агрегатор): RIPEstat, Antifilter.network, Antifilter.download.
+- Использование BGP Community (100-105) для классификации маршрутов (RU, Blocked, Subnets, Gov, Custom).
+- Автоматическое объединение (collapse) пересекающихся и смежных префиксов.
+- `LOCAL_AS` вынесен в переменную окружения systemd для глобального управления community.
+- Лимит экспорта увеличен до 100,000 для предотвращения разрывов сессий при больших списках.
 
 ## State
 - [x] Выбор и обоснование демона
-- [x] Основной конфиг BIRD v2/v3 (template) с примерами статического и динамического соседей
-- [x] Python3 скрипт обновления префиксов (stdlib + compatibility fix)
-- [x] Systemd Service & Timer
-- [x] Инструкция по эксплуатации (обновлена: диагностика для BIRD и vtysh/FRR)
+- [x] Основной конфиг BIRD v2/v3 (агрегатор с поддержкой community)
+- [x] Python3 скрипт агрегации (мульти-источники, collapse, community)
+- [x] Systemd Service & Timer (с поддержкой LOCAL_AS)
+- [x] Инструкция по эксплуатации (BGP Community, Mikrotik)
 - [x] Тест-план
-- [x] Анализ и исправление ошибки запуска BIRD (плейсхолдеры).
-- [x] Исправление ошибки совместимости Python.
-- [x] Сброс истории Git и создание нового Initial commit.
 
 ## Done
-- В `README.md` и `README_EN.md` расширен раздел "Диагностика":
-  - Добавлены команды BIRD для просмотра таблицы и проверки конкретных IP.
-  - Добавлены команды `vtysh` для клиентов (FRR/Cisco) для проверки статуса и полученных маршрутов.
+- Реализован мульти-источник агрегатор в `src/prefix_updater.py`.
+- Добавлена поддержка BGP Community для гибкой фильтрации на стороне клиента.
+- Настроен `bird.conf` для работы с расширенными списками (hold timer, export limit).
+- Обновлен `README.md` с описанием community и примерами для Mikrotik.
 - История Git сброшена, создан новый "Initial commit" в ветке `main` на GitHub.
 
 ## Now
-- Задача завершена.
+- Задача завершена. Все доработки внедрены.
 
 ## Next
-- Проверка чистоты репозитория.
+- Проверка работоспособности на реальных данных.
 
 ## Open questions
 - Нет.
@@ -48,6 +44,6 @@
 ## Working set
 - conf/bird.conf
 - README.md
-- README_EN.md
 - src/prefix_updater.py
 - CONTINUITY.md
+- systemd/bird2-bgp-prefix-updater.service
