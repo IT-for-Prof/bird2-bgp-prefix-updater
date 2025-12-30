@@ -73,11 +73,11 @@ cd bird2-bgp-prefix-updater
 
 | ID | Название | Описание |
 | :--- | :--- | :--- |
-| **100** | **RU Mainland** | Все IPv4 сети РФ (из RIPEstat) |
-| **101** | **AF Ipsum** | Суммаризация отдельных IP Antifilter по маске /24 |
-| **102** | **AF Subnets** | Подсети из официальных списков Antifilter |
+| **100** | **RU Combined** | Все IPv4 сети РФ (из RIPEstat) |
+| **101** | **Blocked Base** | Суммаризация отдельных IP Antifilter по маске /24 |
+| **102** | **RKN Subnets** | Подсети из официальных списков Antifilter |
 | **103** | **Gov Networks** | Сети государственных структур и ведомств |
-| **104** | **Custom Lists** | **Telegram, Cloudflare, Google** и `custom.lst` Antifilter |
+| **104** | **Custom User** | **Telegram, Cloudflare, Google** и `custom.lst` Antifilter |
 | **105** | **Reserved** | Зарезервировано для будущих нужд |
 
 ## Примеры фильтрации (BIRD2)
@@ -85,16 +85,38 @@ cd bird2-bgp-prefix-updater
 Вы можете использовать эти community для гибкой отдачи маршрутов разным клиентам. Примеры фильтров в `bird.conf`:
 
 ### Моно-фильтр (только один тип)
-Отдавать только российские сети (community 100):
+Отдавать российские сети (community 100), исключая те, что попали в списки блокировок (101-105):
 ```bird
 filter export_only_ru {
-    if (MY_AS, 100) ~ bgp_community then accept;
+    if (bgp_community ~ [(MY_AS, 101..105)]) then reject;
+    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+    reject;
+}
+```
+
+### Исключение пересечений (RU vs Blocked)
+Если префикс одновременно является и российским (100), и заблокированным (101-105), данные фильтры гарантируют отдачу только в один конкретный пиринг:
+
+1. **Только чистый RU** (без заблокированных префиксов):
+```bird
+filter export_only_ru {
+    if (bgp_community ~ [(MY_AS, 101..105)]) then reject;
+    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+    reject;
+}
+```
+
+2. **Только блокировки** (без российских префиксов):
+```bird
+filter export_comm101_105 {
+    if (COMM_RU_COMBINED ~ bgp_community) then reject;
+    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
     reject;
 }
 ```
 
 ### Мульти-фильтр (диапазон)
-Элегантный способ разрешить все спец-сети (101-104) одной строкой:
+Элегантный способ разрешить все спец-сети (101-104) одной строкой без дополнительных проверок:
 ```bird
 filter export_special_only {
     if (bgp_community ~ [(MY_AS, 101..104)]) then accept;

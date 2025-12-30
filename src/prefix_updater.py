@@ -18,20 +18,20 @@ LOCAL_AS = int(os.environ.get('LOCAL_AS', '64888'))
 OUTPUT_TXT = os.environ.get('OUTPUT_TXT', "/var/lib/bird/prefixes.txt")
 OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.2; +itforprof.com)'
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.3; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
 # Data Sources (Verified working URLs)
 SOURCES = [
     {
-        "name": "ru_ripe",
+        "name": "ru_combined",
         "url": "https://stat.ripe.net/data/country-resource-list/data.json?resource=ru",
         "community_suffix": 100,
         "format": "json"
     },
     {
-        "name": "antifilter_ipsum",
+        "name": "blocked_base",
         "urls": [
             "https://antifilter.network/download/ipsum.lst",
             "https://antifilter.download/list/ipsum.lst"
@@ -40,7 +40,7 @@ SOURCES = [
         "format": "text"
     },
     {
-        "name": "antifilter_subnets",
+        "name": "rkn_subnets",
         "urls": [
             "https://antifilter.network/download/subnet.lst",
             "https://antifilter.download/list/subnet.lst"
@@ -65,7 +65,7 @@ SOURCES = [
         "format": "text"
     },
     {
-        "name": "custom_user_lists",
+        "name": "custom_user",
         "url": "https://antifilter.network/downloads/custom.lst",
         "community_suffix": 104,
         "format": "text"

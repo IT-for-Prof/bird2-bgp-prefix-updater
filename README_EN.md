@@ -96,19 +96,42 @@ Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 
 | ID | Name | Description |
 | :--- | :--- | :--- |
-| **100** | **RU Mainland** | All IPv4 networks of Russia (RIPEstat) |
-| **101** | **AF Ipsum** | Antifilter's single IPs summarized by /24 |
-| **102** | **AF Subnets** | Subnets from Antifilter's official lists |
+| **100** | **RU Combined** | All IPv4 networks of Russia (RIPEstat) |
+| **101** | **Blocked Base** | Antifilter's single IPs summarized by /24 |
+| **102** | **RKN Subnets** | Subnets from Antifilter's official lists |
 | **103** | **Gov Networks** | Networks of government structures and agencies |
-| **104** | **Custom Lists** | **Telegram, Cloudflare, Google** and Antifilter's `custom.lst` |
+| **104** | **Custom User** | **Telegram, Cloudflare, Google** and Antifilter's `custom.lst` |
 | **105** | **Reserved** | Reserved for future use |
 
 ## Filtering Examples (BIRD2)
 
 ### Only Russia (community 100)
+Export Russian networks (community 100), excluding those found in blocked lists (101-105):
 ```bird
 filter export_only_ru {
-    if (MY_AS, 100) ~ bgp_community then accept;
+    if (bgp_community ~ [(MY_AS, 101..105)]) then reject;
+    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+    reject;
+}
+```
+
+### Mutual Exclusion (RU vs Blocked)
+If a prefix is both Russian (100) and Blocked (101-105), these filters ensure it's only exported to the appropriate peer:
+
+1. **Clean RU Only** (no blocked prefixes):
+```bird
+filter export_only_ru {
+    if (bgp_community ~ [(MY_AS, 101..105)]) then reject;
+    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+    reject;
+}
+```
+
+2. **Blocked Only** (no Russian prefixes):
+```bird
+filter export_comm101_105 {
+    if (COMM_RU_COMBINED ~ bgp_community) then reject;
+    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
     reject;
 }
 ```
