@@ -74,7 +74,7 @@ cd bird2-bgp-prefix-updater
 | ID | Название | Описание |
 | :--- | :--- | :--- |
 | **100** | **RU Combined** | Все IPv4 сети РФ (из RIPEstat) |
-| **101** | **Blocked Base** | Суммаризация отдельных IP Antifilter по маске /24 |
+| **101** | **Blocked Smart** | Суммаризация списков РКН по сетям от /32 до /23 (`ipsmart.lst`) |
 | **102** | **RKN Subnets** | Подсети из официальных списков Antifilter |
 | **103** | **Gov Networks** | Сети государственных структур и ведомств |
 | **104** | **Custom User** | **Telegram, Cloudflare, Google** и `custom.lst` Antifilter |
@@ -110,7 +110,10 @@ filter export_only_ru {
 ```bird
 filter export_comm101_105 {
     if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..105)]) then accept;
+    if (COMM_BLOCKED_SMART ~ bgp_community) then accept;
+    if (COMM_RKN_SUBNETS ~ bgp_community) then accept;
+    if (COMM_GOV_NETS    ~ bgp_community) then accept;
+    if (COMM_CUSTOM_USER ~ bgp_community) then accept;
     reject;
 }
 ```

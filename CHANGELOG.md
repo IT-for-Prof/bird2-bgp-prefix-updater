@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Переименованы BGP Communities для соответствия новой терминологии:
   - `COMM_RU_MAINLAND` -> `COMM_RU_COMBINED` (100)
-  - `COMM_AF_IPSUM` -> `COMM_BLOCKED_BASE` (101)
+  - `COMM_AF_IPSUM` -> `COMM_BLOCKED_SMART` (101)
+- Переход с `ipsum.lst` на более точный `ipsmart.lst` в `prefix_updater.py`.
   - `COMM_AF_SUBNETS` -> `COMM_RKN_SUBNETS` (102)
   - `COMM_CUSTOM_LISTS` -> `COMM_CUSTOM_USER` (104)
 - Обновлены примеры фильтрации в `README.md` и `README_EN.md`.

@@ -31,10 +31,9 @@ SOURCES = [
         "format": "json"
     },
     {
-        "name": "blocked_base",
+        "name": "blocked_smart",
         "urls": [
-            "https://antifilter.network/download/ipsum.lst",
-            "https://antifilter.download/list/ipsum.lst"
+            "https://antifilter.network/download/ipsmart.lst"
         ],
         "community_suffix": 101,
         "format": "text"
