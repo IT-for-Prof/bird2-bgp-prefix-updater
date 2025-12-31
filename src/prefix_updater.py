@@ -11,6 +11,7 @@ import sys
 import hashlib
 import math
 import time
+import argparse
 from typing import List, Tuple, Dict, Set
 
 # Configuration
@@ -18,7 +19,9 @@ LOCAL_AS = int(os.environ.get('LOCAL_AS', '64888'))
 OUTPUT_TXT = os.environ.get('OUTPUT_TXT', "/var/lib/bird/prefixes.txt")
 OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.3; +itforprof.com)'
+CACHE_DIR = os.environ.get('CACHE_DIR', "/tmp/bird2-prefix-cache")
+CACHE_TTL = int(os.environ.get('CACHE_TTL', '3600'))  # 1 hour
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.4; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -164,13 +167,41 @@ def atomic_write(filename: str, content: str) -> None:
     os.rename(tmp, filename)
 
 
-def download_resource(source: Dict) -> List[str]:
-    print(f"Downloading {source['name']} from {source['url']}...")
+def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
+    url = source['url']
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+    cache_path = os.path.join(CACHE_DIR, f"{source['name']}_{url_hash}.cache")
+
+    if not force_refresh and os.path.exists(cache_path):
+        mtime = os.path.getmtime(cache_path)
+        if time.time() - mtime < CACHE_TTL:
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    raw_data = f.read()
+                print(f"Using cached data for {source['name']} ({url})")
+                if source['format'] == 'json':
+                    data = json.loads(raw_data)
+                    return data.get('data', {}).get('resources', {}).get('ipv4', [])
+                else:
+                    return [line.strip() for line in raw_data.splitlines() if line.strip() and not line.startswith('#')]
+            except Exception as e:
+                print(f"Cache read error for {source['name']}: {e}. Downloading...")
+
+    print(f"Downloading {source['name']} from {url}...")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(source['url'], headers={'User-Agent': USER_AGENT})
+            req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
             with urllib.request.urlopen(req, timeout=30) as response:
                 raw_data = response.read().decode('utf-8')
+                
+                # Save to cache
+                try:
+                    os.makedirs(CACHE_DIR, exist_ok=True)
+                    with open(cache_path, 'w', encoding='utf-8') as f:
+                        f.write(raw_data)
+                except Exception as e:
+                    print(f"Warning: Failed to write cache: {e}")
+
                 if source['format'] == 'json':
                     data = json.loads(raw_data)
                     return data.get('data', {}).get('resources', {}).get('ipv4', [])
@@ -183,6 +214,52 @@ def download_resource(source: Dict) -> List[str]:
             print(f"Attempt {attempt} failed for {source['name']}: {e}. Retrying...")
             time.sleep(RETRY_DELAY)
     return []
+
+
+def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
+    """Diagnostic tool to find which source contains a specific IP or CIDR"""
+    print(f"\n--- Diagnostic Search for {target} ---")
+    try:
+        t_start, t_end = cidr_to_range(target)
+    except Exception as e:
+        print(f"Error: Invalid search target '{target}': {e}")
+        return
+
+    found_any = False
+    for src in SOURCES:
+        urls = src.get('urls', [src.get('url')])
+        for url in urls:
+            if not url:
+                continue
+            temp_src = src.copy()
+            temp_src['url'] = url
+            prefixes = download_resource(temp_src, force_refresh=force_refresh)
+            
+            for item in prefixes:
+                item = item.strip()
+                if not item:
+                    continue
+                try:
+                    if '-' in item:
+                        p = [x.strip() for x in item.split('-')]
+                        p_start, p_end = ip_to_int(p[0]), ip_to_int(p[1])
+                    else:
+                        p_start, p_end = cidr_to_range(item if '/' in item else f"{item}/32")
+                    
+                    # Check for overlap
+                    if max(t_start, p_start) <= min(t_end, p_end):
+                        print(f"  [!] MATCH FOUND in source: {src['name']}")
+                        print(f"      Matched prefix: {item}")
+                        print(f"      Source URL: {url}")
+                        print(f"      Assigned Community ID: {src['community_suffix']}")
+                        print("-" * 40)
+                        found_any = True
+                except:
+                    continue
+    
+    if not found_any:
+        print(f"Result: {target} was not found in any source.")
+    print("-" * 40 + "\n")
 
 
 def smoke_test_bird(temp_bird_file: str) -> bool:
@@ -221,6 +298,25 @@ def smoke_test_bird(temp_bird_file: str) -> bool:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description='BIRD2 BGP Prefix Updater - Automates downloading and aggregating BGP prefixes from multiple sources.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                        # Run update (standard mode)
+  %(prog)s --check 1.1.1.1        # Check which source contains this IP
+  %(prog)s --check 194.67.72.0/24 # Check which source contains this subnet
+  %(prog)s --force-refresh        # Ignore cache and download all sources fresh
+        """
+    )
+    parser.add_argument('--check', type=str, help='Check which source contains a specific IP or CIDR (diagnostic mode)')
+    parser.add_argument('--force-refresh', action='store_true', help='Ignore local cache and download everything from the Internet')
+    args = parser.parse_args()
+
+    if args.check:
+        check_address_in_sources(args.check, force_refresh=args.force_refresh)
+        return
+
     all_routes: Dict[str, Set[int]] = {}  # CIDR -> set of community suffixes
 
     for src in SOURCES:
@@ -232,7 +328,7 @@ def main() -> None:
             # Create a shallow copy to safely update the URL for the download function
             temp_src = src.copy()
             temp_src['url'] = url
-            all_src_prefixes.extend(download_resource(temp_src))
+            all_src_prefixes.extend(download_resource(temp_src, force_refresh=args.force_refresh))
 
         processed: List[str] = []
         for item in all_src_prefixes:

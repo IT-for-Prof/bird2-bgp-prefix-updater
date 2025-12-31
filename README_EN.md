@@ -195,16 +195,27 @@ protocol bgp any_client from t_client {
 }
 ```
 
-## Diagnostics
+## Diagnostics and Debugging
+### Finding the source of a prefix
+If you find that an IP is blocked or allowed incorrectly, you can quickly find which list it came from:
+```bash
+/usr/local/bin/prefix_updater.py --check 194.67.72.31
+```
+The script will check all sources and output the source name, URL, and assigned Community ID.
 
-### BIRD (on server)
-- **Status check**: `birdc show protocols`
+### Caching
+The script caches downloaded lists in `/tmp/bird2-prefix-cache` for **1 hour**. This allows for fast diagnostics without re-downloading data.
+- To force a cache refresh, use the `--force-refresh` flag:
+  ```bash
+  /usr/local/bin/prefix_updater.py --force-refresh
+  ```
+
+### General commands
+- **BGP Status**: `birdc show protocols`
 - **View all routes in table**: `birdc "show route table t_bgp_prefixes"`
-- **Route count**: `birdc "show route table t_bgp_prefixes count"`
 - **Detailed info for a specific IP**: `birdc "show route for 77.88.44.242 table t_bgp_prefixes all"`
 - **Force manual update**: `systemctl start bird2-bgp-prefix-updater.service`
 - **Update logs**: `journalctl -u bird2-bgp-prefix-updater.service -f`
-- **Timer status**: `systemctl list-timers bird2-bgp-prefix-updater.timer`
 
 ### Client (pfSense / FRR / Cisco)
 - **General BGP status**: `vtysh -c "show bgp summary"` or `vtysh -c "show bgp ipv4 unicast summary"`
