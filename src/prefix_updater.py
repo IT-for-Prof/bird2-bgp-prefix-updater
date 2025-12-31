@@ -259,6 +259,21 @@ def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
     
     if not found_any:
         print(f"Result: {target} was not found in any source.")
+    print("-" * 40)
+
+    # BIRD Internal Table Check
+    print(f"\n--- BIRD Internal Table Check ---")
+    bird_cmd = f'birdc "show route for {target} table t_bgp_prefixes all"'
+    print(f"Running: {bird_cmd}\n")
+    
+    # Run birdc and let it output directly to stdout
+    res = os.system(bird_cmd)
+    if res != 0:
+        print("\n[!] Note: birdc command failed. Possible reasons:")
+        print("    - BIRD is not running")
+        print("    - Table 't_bgp_prefixes' does not exist")
+        print("    - Insufficient permissions to run birdc")
+    
     print("-" * 40 + "\n")
 
 
