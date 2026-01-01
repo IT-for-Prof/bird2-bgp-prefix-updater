@@ -21,7 +21,7 @@ OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
 CACHE_DIR = os.environ.get('CACHE_DIR', "/tmp/bird2-prefix-cache")
 CACHE_TTL = int(os.environ.get('CACHE_TTL', '3600'))  # 1 hour
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.4; +itforprof.com)'
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.5; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -33,12 +33,28 @@ SOURCES = [
         "community_suffix": 100,
         "format": "json"
     },
+    # {
+    #     "name": "blocked_smart",
+    #     "urls": [
+    #         "https://antifilter.network/download/ipsmart.lst"
+    #     ],
+    #     "community_suffix": 101,
+    #     "format": "text"
+    # },
+    # {
+    #     "name": "blocked_sum",
+    #     "urls": [
+    #         "https://antifilter.network/download/ipsum.lst"
+    #     ],
+    #     "community_suffix": 105,
+    #     "format": "text"
+    # },
     {
-        "name": "blocked_smart",
+        "name": "blocked_ip",
         "urls": [
-            "https://antifilter.network/download/ipsmart.lst"
+            "https://antifilter.network/download/ip.lst"
         ],
-        "community_suffix": 101,
+        "community_suffix": 106,
         "format": "text"
     },
     {
