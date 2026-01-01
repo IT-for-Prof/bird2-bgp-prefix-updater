@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-01-01
+### Added
+- Добавлен список `ip.lst` как активный источник префиксов (Community 106).
+- Добавлен закомментированный шаблон для списка `ipsum.lst` (Community 105).
+
+### Changed
+- Список `ipsmart.lst` (Community 101) деактивирован (закомментирован) по запросу.
+- Версия скрипта обновлена до 2.5.
+
 ## [2.4.0] - 2025-12-31
 ### Added
 - Встроенная диагностика: флаг `--check <IP/CIDR>` позволяет найти источник префикса во всех списках.
