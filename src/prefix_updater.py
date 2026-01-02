@@ -21,7 +21,7 @@ OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
 CACHE_DIR = os.environ.get('CACHE_DIR', "/tmp/bird2-prefix-cache")
 CACHE_TTL = int(os.environ.get('CACHE_TTL', '3600'))  # 1 hour
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.5; +itforprof.com)'
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.6; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -86,6 +86,16 @@ SOURCES = [
         "name": "custom_user",
         "url": "https://antifilter.network/downloads/custom.lst",
         "community_suffix": 104,
+        "format": "text"
+    },
+    {
+        "name": "stripe_networks",
+        "urls": [
+            "https://stripe.com/files/ips/ips_api.txt",
+            "https://stripe.com/files/ips/ips_armada_gator.txt",
+            "https://stripe.com/files/ips/ips_webhooks.txt"
+        ],
+        "community_suffix": 107,
         "format": "text"
     }
 ]
