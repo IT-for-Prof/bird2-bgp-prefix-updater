@@ -45,6 +45,7 @@ cd bird2-bgp-prefix-updater
    ```bash
    install -m755 src/prefix_updater.py /usr/local/bin/prefix_updater.py
    install -m644 conf/bird.conf /etc/bird/bird.conf
+   install -m644 conf/custom.lst /etc/bird/custom.lst
    install -m644 systemd/bird2-bgp-prefix-updater.service /etc/systemd/system/
    install -m644 systemd/bird2-bgp-prefix-updater.timer /etc/systemd/system/
    ```

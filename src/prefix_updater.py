@@ -78,7 +78,7 @@ SOURCES = [
             "https://core.telegram.org/resources/cidr.txt",
             "https://www.cloudflare.com/ips-v4",
             "https://www.gstatic.com/ipranges/goog.txt",
-            "conf/custom.lst"  # Local file
+            "/etc/bird/custom.lst"  # Local file
         ],
         "community_suffix": 104,
         "format": "text"
