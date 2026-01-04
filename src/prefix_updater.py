@@ -21,7 +21,7 @@ OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
 CACHE_DIR = os.environ.get('CACHE_DIR', "/tmp/bird2-prefix-cache")
 CACHE_TTL = int(os.environ.get('CACHE_TTL', '3600'))  # 1 hour
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.6; +itforprof.com)'
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.7; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -77,7 +77,8 @@ SOURCES = [
         "urls": [
             "https://core.telegram.org/resources/cidr.txt",
             "https://www.cloudflare.com/ips-v4",
-            "https://www.gstatic.com/ipranges/goog.txt"
+            "https://www.gstatic.com/ipranges/goog.txt",
+            "conf/custom.lst"  # Local file
         ],
         "community_suffix": 104,
         "format": "text"
@@ -97,6 +98,12 @@ SOURCES = [
         ],
         "community_suffix": 107,
         "format": "text"
+    },
+    {
+        "name": "bytedance_as396986",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS396986",
+        "community_suffix": 108,
+        "format": "json"
     }
 ]
 
@@ -195,6 +202,20 @@ def atomic_write(filename: str, content: str) -> None:
 
 def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
     url = source['url']
+    
+    # Handle local files
+    if not url.startswith('http'):
+        if os.path.exists(url):
+            try:
+                with open(url, 'r', encoding='utf-8') as f:
+                    return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            except Exception as e:
+                print(f"Error reading local file {url}: {e}")
+                return []
+        else:
+            print(f"Warning: Local file {url} not found.")
+            return []
+
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
     cache_path = os.path.join(CACHE_DIR, f"{source['name']}_{url_hash}.cache")
 
@@ -207,7 +228,15 @@ def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
                 print(f"Using cached data for {source['name']} ({url})")
                 if source['format'] == 'json':
                     data = json.loads(raw_data)
-                    return data.get('data', {}).get('resources', {}).get('ipv4', [])
+                    d = data.get('data', {})
+                    # Path 1: country-resource-list (countries)
+                    res = d.get('resources', {}).get('ipv4', [])
+                    if res: return res
+                    # Path 2: announced-prefixes (ASes)
+                    prefixes = d.get('prefixes', [])
+                    if prefixes:
+                        return [p['prefix'] for p in prefixes if 'prefix' in p]
+                    return []
                 else:
                     return [line.strip() for line in raw_data.splitlines() if line.strip() and not line.startswith('#')]
             except Exception as e:
@@ -230,7 +259,15 @@ def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
 
                 if source['format'] == 'json':
                     data = json.loads(raw_data)
-                    return data.get('data', {}).get('resources', {}).get('ipv4', [])
+                    d = data.get('data', {})
+                    # Path 1: country-resource-list
+                    res = d.get('resources', {}).get('ipv4', [])
+                    if res: return res
+                    # Path 2: announced-prefixes
+                    prefixes = d.get('prefixes', [])
+                    if prefixes:
+                        return [p['prefix'] for p in prefixes if 'prefix' in p]
+                    return []
                 else:
                     return [line.strip() for line in raw_data.splitlines() if line.strip() and not line.startswith('#')]
         except Exception as e:
