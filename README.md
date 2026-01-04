@@ -83,28 +83,29 @@ cd bird2-bgp-prefix-updater
 | **106** | **Blocked IP** | Список IP (`ip.lst`) Antifilter |
 | **107** | **Stripe IP** | Сети Stripe (API, Webhooks, etc) |
 | **108** | **ByteDance** | Префиксы AS396986 (ByteDance) |
+| **109** | **Akamai** | Префиксы AS20940 (Akamai) |
 
 ## Примеры фильтрации (BIRD2)
 
 Вы можете использовать эти community для гибкой отдачи маршрутов разным клиентам. Примеры фильтров в `bird.conf`:
 
 ### Моно-фильтр (только один тип)
-Отдавать российские сети (community 100), исключая те, что попали в списки блокировок (101-108):
+Отдавать российские сети (community 100), исключая те, что попали в списки блокировок (101-109):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..108)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
 ```
 
 ### Исключение пересечений (RU vs Blocked)
-Если префикс одновременно является и российским (100), и заблокированным (101-108), данные фильтры гарантируют отдачу только в один конкретный пиринг:
+Если префикс одновременно является и российским (100), и заблокированным (101-109), данные фильтры гарантируют отдачу только в один конкретный пиринг:
 
 1. **Только чистый RU** (без заблокированных префиксов):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..108)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -112,18 +113,18 @@ filter export_only_ru {
 
 2. **Только блокировки** (без российских префиксов):
 ```bird
-filter export_comm101_108 {
+filter export_comm101_109 {
     if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..108)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then accept;
     reject;
 }
 ```
 
 ### Мульти-фильтр (диапазон)
-Элегантный способ разрешить все спец-сети (101-108) одной строкой без дополнительных проверок:
+Элегантный способ разрешить все спец-сети (101-109) одной строкой без дополнительных проверок:
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..108)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then accept;
     reject;
 }
 ```
