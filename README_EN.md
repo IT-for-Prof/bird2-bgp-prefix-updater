@@ -106,26 +106,27 @@ Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 | **106** | **Blocked IP** | IP list (`ip.lst`) from Antifilter |
 | **107** | **Stripe IP** | Stripe networks (API, Webhooks, etc) |
 | **108** | **ByteDance** | AS396986 (ByteDance) prefixes |
+| **109** | **Akamai** | AS20940 (Akamai) prefixes |
 
 ## Filtering Examples (BIRD2)
 
 ### Only Russia (community 100)
-Export Russian networks (community 100), excluding those found in blocked lists (101-108):
+Export Russian networks (community 100), excluding those found in blocked lists (101-109):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..108)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
 ```
 
 ### Mutual Exclusion (RU vs Blocked)
-If a prefix is both Russian (100) and Blocked (101-108), these filters ensure it's only exported to the appropriate peer:
+If a prefix is both Russian (100) and Blocked (101-109), these filters ensure it's only exported to the appropriate peer:
 
 1. **Clean RU Only** (no blocked prefixes):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..108)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -133,17 +134,17 @@ filter export_only_ru {
 
 2. **Blocked Only** (no Russian prefixes):
 ```bird
-filter export_comm101_108 {
+filter export_comm101_109 {
     if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..108)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then accept;
     reject;
 }
 ```
 
-### All special networks (range 101-108)
+### All special networks (range 101-109)
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..108)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..109)]) then accept;
     reject;
 }
 ```

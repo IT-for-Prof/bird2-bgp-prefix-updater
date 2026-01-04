@@ -21,7 +21,7 @@ OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
 CACHE_DIR = os.environ.get('CACHE_DIR', "/tmp/bird2-prefix-cache")
 CACHE_TTL = int(os.environ.get('CACHE_TTL', '3600'))  # 1 hour
-USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.7; +itforprof.com)'
+USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.8; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -103,6 +103,12 @@ SOURCES = [
         "name": "bytedance_as396986",
         "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS396986",
         "community_suffix": 108,
+        "format": "json"
+    },
+    {
+        "name": "akamai_as20940",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS20940",
+        "community_suffix": 109,
         "format": "json"
     }
 ]
