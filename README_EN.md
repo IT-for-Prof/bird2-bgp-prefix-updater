@@ -102,26 +102,29 @@ Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 | **103** | **Gov Networks** | Networks of government structures and agencies |
 | **104** | **Custom User** | **Telegram, Cloudflare, Google** and Antifilter's `custom.lst` |
 | **105** | **Reserved** | Reserved for future use |
+| **106** | **Blocked IP** | IP list (`ip.lst`) from Antifilter |
+| **107** | **Stripe IP** | Stripe networks (API, Webhooks, etc) |
+| **108** | **ByteDance** | AS396986 (ByteDance) prefixes |
 
 ## Filtering Examples (BIRD2)
 
 ### Only Russia (community 100)
-Export Russian networks (community 100), excluding those found in blocked lists (101-105):
+Export Russian networks (community 100), excluding those found in blocked lists (101-108):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..105)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..108)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
 ```
 
 ### Mutual Exclusion (RU vs Blocked)
-If a prefix is both Russian (100) and Blocked (101-105), these filters ensure it's only exported to the appropriate peer:
+If a prefix is both Russian (100) and Blocked (101-108), these filters ensure it's only exported to the appropriate peer:
 
 1. **Clean RU Only** (no blocked prefixes):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..105)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..108)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -129,20 +132,17 @@ filter export_only_ru {
 
 2. **Blocked Only** (no Russian prefixes):
 ```bird
-filter export_comm101_105 {
+filter export_comm101_108 {
     if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (COMM_BLOCKED_SMART ~ bgp_community) then accept;
-    if (COMM_RKN_SUBNETS ~ bgp_community) then accept;
-    if (COMM_GOV_NETS    ~ bgp_community) then accept;
-    if (COMM_CUSTOM_USER ~ bgp_community) then accept;
+    if (bgp_community ~ [(MY_AS, 101..108)]) then accept;
     reject;
 }
 ```
 
-### All special networks (range 101-104)
+### All special networks (range 101-108)
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..104)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..108)]) then accept;
     reject;
 }
 ```
