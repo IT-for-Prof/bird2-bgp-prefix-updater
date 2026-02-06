@@ -12,15 +12,40 @@ import hashlib
 import math
 import time
 import argparse
-from typing import List, Tuple, Dict, Set
+import re
+from typing import List, Tuple, Dict, Set, Optional
 
 # Configuration
-LOCAL_AS = int(os.environ.get('LOCAL_AS', '64888'))
 OUTPUT_TXT = os.environ.get('OUTPUT_TXT', "/var/lib/bird/prefixes.txt")
 OUTPUT_BIRD = os.environ.get('OUTPUT_BIRD', "/etc/bird/prefixes.bird")
 BIRD_CONF = os.environ.get('BIRD_CONF', "/etc/bird/bird.conf")
-CACHE_DIR = os.environ.get('CACHE_DIR', "/tmp/bird2-prefix-cache")
-CACHE_TTL = int(os.environ.get('CACHE_TTL', '3600'))  # 1 hour
+
+
+def _detect_local_as() -> int:
+    """Auto-detect MY_AS from BIRD config (local-settings.conf included via bird.conf)."""
+    env_as = os.environ.get('LOCAL_AS')
+    if env_as:
+        return int(env_as)
+    # Search BIRD config directory for 'define MY_AS = <number>'
+    bird_dir = os.path.dirname(BIRD_CONF)
+    for filename in [os.path.join(bird_dir, 'local-settings.conf'), BIRD_CONF]:
+        if os.path.exists(filename):
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        match = re.match(r'\s*define\s+MY_AS\s*=\s*(\d+)\s*;', line)
+                        if match:
+                            return int(match.group(1))
+            except Exception:
+                continue
+    print("WARNING: Could not detect MY_AS from BIRD config, using default 64888")
+    return 64888
+
+
+LOCAL_AS = _detect_local_as()
+CACHE_DIR = os.environ.get('CACHE_DIR', "/var/lib/bird/prefix-cache")
+CACHE_TTL = int(os.environ.get('CACHE_TTL', '21600'))  # 6 hours
+STALE_CACHE_MAX_AGE = int(os.environ.get('STALE_CACHE_MAX_AGE', '604800'))  # 7 days
 USER_AGENT = 'Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.9; +itforprof.com)'
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
@@ -212,7 +237,50 @@ def atomic_write(filename: str, content: str) -> None:
     os.rename(tmp, filename)
 
 
-def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
+def parse_old_prefixes(filepath: str) -> Dict[str, Set[int]]:
+    """Parse existing prefixes.bird file into {CIDR: set of community suffixes}."""
+    result: Dict[str, Set[int]] = {}
+    if not os.path.exists(filepath):
+        return result
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line.startswith('route '):
+                continue
+            parts = line.split()
+            cidr = parts[1]
+            comms: Set[int] = set()
+            for match in re.finditer(r'\(\d+,\s*(\d+)\)', line):
+                comms.add(int(match.group(1)))
+            if cidr and comms:
+                result[cidr] = comms
+    return result
+
+
+def _parse_cached_data(cache_path: str, source: Dict) -> Optional[List[str]]:
+    """Parse a cached file for a given source. Returns list of prefixes or None on error."""
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            raw_data = f.read()
+        if source['format'] == 'json':
+            data = json.loads(raw_data)
+            d = data.get('data', {})
+            res = d.get('resources', {}).get('ipv4', [])
+            if res:
+                return res
+            prefixes = d.get('prefixes', [])
+            if prefixes:
+                return [p['prefix'] for p in prefixes if 'prefix' in p]
+            return []
+        else:
+            return [line.strip() for line in raw_data.splitlines()
+                    if line.strip() and not line.startswith('#')]
+    except Exception as e:
+        print(f"Cache parse error for {source['name']}: {e}")
+        return None
+
+
+def download_resource(source: Dict, force_refresh: bool = False) -> Optional[List[str]]:
     url = source['url']
     
     # Handle local files
@@ -234,25 +302,12 @@ def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
     if not force_refresh and os.path.exists(cache_path):
         mtime = os.path.getmtime(cache_path)
         if time.time() - mtime < CACHE_TTL:
-            try:
-                with open(cache_path, 'r', encoding='utf-8') as f:
-                    raw_data = f.read()
+            result = _parse_cached_data(cache_path, source)
+            if result is not None:
                 print(f"Using cached data for {source['name']} ({url})")
-                if source['format'] == 'json':
-                    data = json.loads(raw_data)
-                    d = data.get('data', {})
-                    # Path 1: country-resource-list (countries)
-                    res = d.get('resources', {}).get('ipv4', [])
-                    if res: return res
-                    # Path 2: announced-prefixes (ASes)
-                    prefixes = d.get('prefixes', [])
-                    if prefixes:
-                        return [p['prefix'] for p in prefixes if 'prefix' in p]
-                    return []
-                else:
-                    return [line.strip() for line in raw_data.splitlines() if line.strip() and not line.startswith('#')]
-            except Exception as e:
-                print(f"Cache read error for {source['name']}: {e}. Downloading...")
+                return result
+            else:
+                print(f"Cache read error for {source['name']}: re-downloading...")
 
     print(f"Downloading {source['name']} from {url}...")
     for attempt in range(1, MAX_RETRIES + 1):
@@ -285,10 +340,20 @@ def download_resource(source: Dict, force_refresh: bool = False) -> List[str]:
         except Exception as e:
             if attempt == MAX_RETRIES:
                 print(f"Error: Failed to download {source['name']} after {MAX_RETRIES} attempts: {e}")
-                return []
-            print(f"Attempt {attempt} failed for {source['name']}: {e}. Retrying...")
-            time.sleep(RETRY_DELAY)
-    return []
+                # Fallback: try stale cache within STALE_CACHE_MAX_AGE
+                if os.path.exists(cache_path):
+                    cache_age = time.time() - os.path.getmtime(cache_path)
+                    if cache_age <= STALE_CACHE_MAX_AGE:
+                        stale_data = _parse_cached_data(cache_path, source)
+                        if stale_data:
+                            print(f"WARNING: Using stale cache for {source['name']} (age: {cache_age/3600:.1f}h)")
+                            return stale_data
+                    else:
+                        print(f"WARNING: Stale cache for {source['name']} too old ({cache_age/86400:.1f} days), discarding")
+                return None
+            print(f"Attempt {attempt} failed for {source['name']}: {e}. Retrying in {RETRY_DELAY * (2 ** (attempt - 1))}s...")
+            time.sleep(RETRY_DELAY * (2 ** (attempt - 1)))
+    return None
 
 
 def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
@@ -309,7 +374,9 @@ def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
             temp_src = src.copy()
             temp_src['url'] = url
             prefixes = download_resource(temp_src, force_refresh=force_refresh)
-            
+            if prefixes is None:
+                continue
+
             for item in prefixes:
                 item = item.strip()
                 if not item:
@@ -407,18 +474,47 @@ Examples:
         check_address_in_sources(args.check, force_refresh=args.force_refresh)
         return
 
+    start_time = time.time()
+    print(f"=== BIRD2 BGP Prefix Updater ===")
+    print(f"AS: {LOCAL_AS} | Cache TTL: {CACHE_TTL//3600}h | Stale limit: {STALE_CACHE_MAX_AGE//86400}d")
+    print()
+
     all_routes: Dict[str, Set[int]] = {}  # CIDR -> set of community suffixes
+    old_routes = parse_old_prefixes(OUTPUT_BIRD)
+    failed_communities: Set[int] = set()
+    source_stats: List[Tuple[str, int, int, str]] = []  # (name, community, count, status)
 
     for src in SOURCES:
         urls = src.get('urls', [src.get('url')])
-        all_src_prefixes = []
+        all_src_prefixes: List[str] = []
+        any_success = False
+        failed_urls: List[str] = []
+
         for url in urls:
             if not url:
                 continue
             # Create a shallow copy to safely update the URL for the download function
             temp_src = src.copy()
             temp_src['url'] = url
-            all_src_prefixes.extend(download_resource(temp_src, force_refresh=args.force_refresh))
+            result = download_resource(temp_src, force_refresh=args.force_refresh)
+            if result is None:
+                failed_urls.append(url)
+            else:
+                all_src_prefixes.extend(result)
+                any_success = True
+
+        if not any_success:
+            failed_communities.add(src['community_suffix'])
+            # Count old routes for this community
+            old_count = sum(1 for comms in old_routes.values() if src['community_suffix'] in comms)
+            source_stats.append((src['name'], src['community_suffix'], old_count, 'FALLBACK'))
+            for url in failed_urls:
+                print(f"  ERROR: {url}")
+            continue
+
+        if failed_urls:
+            for url in failed_urls:
+                print(f"  WARNING: Failed URL (other URLs OK): {url}")
 
         processed: List[str] = []
         for item in all_src_prefixes:
@@ -437,14 +533,44 @@ Examples:
         valid = [p for p in processed if validate_cidr(p)]
         collapsed = collapse_networks(valid)
 
+        source_stats.append((src['name'], src['community_suffix'], len(collapsed), 'OK'))
+
         for p in collapsed:
-            if p not in all_routes:
-                all_routes[p] = set()
-            all_routes[p].add(src['community_suffix'])
+            all_routes.setdefault(p, set()).add(src['community_suffix'])
+
+    # Restore old routes for failed communities
+    if failed_communities:
+        restored = 0
+        for cidr, comms in old_routes.items():
+            for comm in comms:
+                if comm in failed_communities:
+                    all_routes.setdefault(cidr, set()).add(comm)
+                    restored += 1
+        print(f"\n  Restored {restored} old routes for communities: {sorted(failed_communities)}")
+
+    # Print summary table
+    print(f"\n{'Source':<25} {'Comm':>4} {'Prefixes':>10} {'Status':<10}")
+    print("-" * 55)
+    for name, comm, count, status in source_stats:
+        status_str = status
+        if status == 'FALLBACK':
+            status_str = 'FALLBACK!'
+        print(f"  {name:<23} {comm:>4} {count:>10} {status_str:<10}")
+    print("-" * 55)
 
     if not all_routes:
-        print("Error: No prefixes collected from any source.")
+        print("\nERROR: No prefixes collected from any source.")
         sys.exit(1)
+
+    # Per-community totals
+    comm_totals: Dict[int, int] = {}
+    for comms in all_routes.values():
+        for c in comms:
+            comm_totals[c] = comm_totals.get(c, 0) + 1
+    print(f"  {'TOTAL':<23} {'':>4} {len(all_routes):>10}")
+    print(f"\nPer-community breakdown:")
+    for comm in sorted(comm_totals.keys()):
+        print(f"  Community {comm:>3}: {comm_totals[comm]:>10} routes")
 
     sorted_cidrs = sorted(all_routes.keys(), key=lambda x: (ip_to_int(x.split('/')[0]), int(x.split('/')[1])))
 
@@ -461,7 +587,7 @@ Examples:
 
     # Self-check
     if "bgp_community.add([(" in bird_content:
-        print("Error: Invalid community format detected (found 'bgp_community.add([(').")
+        print("\nERROR: Invalid community format detected (found 'bgp_community.add([(').")
         invalid = [l for l in bird_lines if "bgp_community.add([(" in l]
         for l in invalid[:5]:
             print(f"  Invalid line: {l}")
@@ -473,8 +599,13 @@ Examples:
         with open(OUTPUT_BIRD, 'r', encoding='utf-8') as f:
             old_hash = hashlib.sha256(f.read().encode()).hexdigest()
 
+    elapsed = time.time() - start_time
+
     if new_hash == old_hash:
-        print(f"No changes. Total routes: {len(all_routes)}")
+        failed = sum(1 for _, _, _, s in source_stats if s == 'FALLBACK')
+        ok = sum(1 for _, _, _, s in source_stats if s == 'OK')
+        print(f"\nResult: No changes | {ok} OK, {failed} fallback | "
+              f"Total: {len(all_routes)} routes | {elapsed:.1f}s")
         return
 
     # Atomic write for TXT
@@ -488,18 +619,23 @@ Examples:
         f.flush()
         os.fsync(f.fileno())
 
-    print("Running smoke test...")
+    print("\nRunning smoke test...")
     if smoke_test_bird(temp_bird):
         if os.name == 'nt' and os.path.exists(OUTPUT_BIRD):
             os.remove(OUTPUT_BIRD)
         os.rename(temp_bird, OUTPUT_BIRD)
-        print(f"Updated. Total routes: {len(all_routes)}, Hash: {new_hash[:8]}")
-        
+
         # Reload BIRD
         if os.system("birdc configure") != 0:
-            print("Warning: birdc configure failed. Is BIRD running?")
+            print("WARNING: birdc configure failed. Is BIRD running?")
+
+        elapsed = time.time() - start_time
+        failed = sum(1 for _, _, _, s in source_stats if s == 'FALLBACK')
+        ok = sum(1 for _, _, _, s in source_stats if s == 'OK')
+        print(f"\nResult: Updated | {ok} OK, {failed} fallback | "
+              f"Total: {len(all_routes)} routes | Hash: {new_hash[:8]} | {elapsed:.1f}s")
     else:
-        print("Error: Smoke test failed. New configuration is invalid. Keeping old file.")
+        print("\nERROR: Smoke test failed. New configuration is invalid. Keeping old file.")
         if os.path.exists(temp_bird):
             os.remove(temp_bird)
         sys.exit(1)

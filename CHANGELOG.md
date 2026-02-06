@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-02-06
+### Added
+- **Per-source fallback resilience**: When a data source fails, old routes for that community are preserved from existing `prefixes.bird` instead of being deleted. Partial failures (some URLs work) don't trigger fallback.
+- **Stale cache fallback**: If download fails after retries, script uses expired cache data (up to 7 days old) instead of returning empty results.
+- **MY_AS auto-detection**: Script now automatically reads `MY_AS` from `/etc/bird/local-settings.conf` or `bird.conf`, eliminating need to set `LOCAL_AS` environment variable manually.
+- **Improved logging**: New summary table showing per-source status (OK/FALLBACK), per-community breakdown, timing, and overall health.
+- **Config split architecture**: `bird.conf` now uses includes for local settings and peers, allowing git-managed common config with local customizations that won't be overwritten.
+  - `include "/etc/bird/local-settings.conf"` — router id, MY_AS, logging (not in git)
+  - `include "/etc/bird/peers.d/*.conf"` — BGP peer definitions (not in git)
+- Added example `conf/local-settings.conf.example` for reference.
+- Exponential backoff on retries: 10s, 20s, 40s delays instead of fixed 10s.
+
+### Changed
+- **Cache moved to persistent directory**: `/var/lib/bird/prefix-cache/` instead of `/tmp/bird2-prefix-cache/` to survive reboots.
+- **Cache TTL increased**: From 1 hour to 6 hours (configurable via `CACHE_TTL` env var).
+- **Systemd service updated**: Script path changed from `/usr/local/bin/prefix_updater.py` to `/opt/bird2-bgp-prefix-updater/src/prefix_updater.py`. Removed hardcoded `LOCAL_AS=64888` (auto-detected now).
+- **Download error handling**: `download_resource()` now returns `None` on error instead of `[]`, allowing distinction between failures and legitimately empty sources.
+- BIRD config template (`conf/bird.conf`) now uses include structure and updated filter ranges to 101..110.
+- Version 3.0.0.
+
+### Fixed
+- Filter ranges in `export_only_ru`, `export_blocked_lists`, `export_special_networks` updated from 101..109 to 101..110 to include Roblox (community 110).
+
 ## [2.9.0] - 2026-01-05
 ### Added
 - Добавлено скачивание префиксов AS22697 (Roblox) через RIPEstat API (Community 110).

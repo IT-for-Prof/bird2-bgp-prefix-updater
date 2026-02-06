@@ -1,0 +1,7 @@
+/* Local settings - not managed by git */
+/* Copy this file to /etc/bird/local-settings.conf and edit */
+
+log syslog all;
+
+router id 10.0.0.1;
+define MY_AS = 65000;
