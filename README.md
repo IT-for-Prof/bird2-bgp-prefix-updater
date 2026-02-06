@@ -1,6 +1,13 @@
 # BIRD2-BGP-Prefix-Updater (Multi-Source Aggregator)
 
-Автоматический агрегатор BGP-префиксов из нескольких источников (RIPEstat, Antifilter.network, Antifilter.download) с поддержкой BGP Community и автоматической оптимизацией (collapse).
+Автоматический агрегатор BGP-префиксов из нескольких источников (RIPEstat, Antifilter.network, Antifilter.download) с поддержкой BGP Community, автоматической оптимизацией (collapse) и отказоустойчивостью.
+
+## Основные возможности
+- **Отказоустойчивость**: При сбое источника сохраняются старые маршруты вместо их удаления
+- **Резервный кэш**: Использование устаревшего кэша (до 7 дней) при недоступности источников
+- **Автоопределение MY_AS**: Чтение номера AS из конфигурации BIRD автоматически
+- **Разделение конфигурации**: `bird.conf` из git + локальные настройки в отдельных файлах
+- **Улучшенное логирование**: Детальные таблицы статуса, разбивка по community, тайминг
 
 ## Требования
 - Linux (Debian/Ubuntu или RHEL/Alma/CentOS).
@@ -34,40 +41,68 @@ cd bird2-bgp-prefix-updater
 
 ## Установка и размещение файлов
 
-1. **Разместите файлы проекта:**
+1. **Установите файлы проекта:**
    ```bash
-   install -m755 src/prefix_updater.py /usr/local/bin/prefix_updater.py
+   # Скопируйте BIRD config (общий, из git)
    install -m644 conf/bird.conf /etc/bird/bird.conf
    install -m644 conf/custom.lst /etc/bird/custom.lst
+
+   # Systemd сервис и таймер
    install -m644 systemd/bird2-bgp-prefix-updater.service /etc/systemd/system/
    install -m644 systemd/bird2-bgp-prefix-updater.timer /etc/systemd/system/
    ```
 
-2. **Подготовьте рабочие директории:**
+2. **Создайте локальные настройки (не в git):**
    ```bash
-   mkdir -p /var/lib/bird
+   # Создайте local-settings.conf с вашими параметрами
+   cat > /etc/bird/local-settings.conf <<'EOF'
+   log syslog all;
+   router id 10.0.0.1;           # Ваш router ID
+   define MY_AS = 65000;         # Ваш AS номер
+   EOF
+
+   # Создайте директорию для пиров
+   mkdir -p /etc/bird/peers.d
+   ```
+
+3. **Подготовьте рабочие директории:**
+   ```bash
+   mkdir -p /var/lib/bird /var/lib/bird/prefix-cache
    touch /etc/bird/prefixes.bird
    chown bird:bird /etc/bird/prefixes.bird # Для Debian/Ubuntu
    ```
 
-3. **Настройте BIRD:**
-   Отредактируйте `/etc/bird/bird.conf` и замените `${ROUTER_ID}` на ваш IP, а `${LOCAL_AS}` на номер вашей автономной системы.
-
-4. **Настройте LOCAL_AS в сервисе:**
+4. **Добавьте BGP пиры** (примеры в `/etc/bird/peers.d/`):
    ```bash
-   systemctl edit bird2-bgp-prefix-updater.service
-   # Добавьте ваш номер AS (по умолчанию 64888):
-   [Service]
-   Environment="LOCAL_AS=64888"
+   cat > /etc/bird/peers.d/my_peer.conf <<'EOF'
+   protocol bgp my_peer from t_client {
+       neighbor 192.0.2.2 as 65002;
+       ipv4 { export filter export_only_ru; };
+   }
+   EOF
    ```
 
 5. **Запустите обновление:**
    ```bash
-   /usr/local/bin/prefix_updater.py
+   # Скрипт автоматически определит MY_AS из local-settings.conf
+   python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py
+
    systemctl daemon-reload
    systemctl enable --now bird
    systemctl enable --now bird2-bgp-prefix-updater.timer
    ```
+
+### Структура файлов `/etc/bird/`
+```
+/etc/bird/
+  bird.conf                 ← из git (общая конфигурация)
+  local-settings.conf       ← ваши настройки (router id, MY_AS, logging)
+  peers.d/*.conf            ← ваши BGP пиры (не перезаписываются)
+  prefixes.bird             ← автогенерация скриптом
+  custom.lst                ← ваши кастомные IP
+```
+
+При `git pull` обновляется только `bird.conf` (фильтры, communities, шаблоны). Ваши локальные настройки и пиры не затрагиваются.
 
 ## BGP Communities
 Скрипт помечает маршруты следующими community (формат `LOCAL_AS:ID`):

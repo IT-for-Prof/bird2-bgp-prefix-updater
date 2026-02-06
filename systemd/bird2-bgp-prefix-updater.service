@@ -4,13 +4,10 @@ After=network.target bird.service
 
 [Service]
 Type=oneshot
-Environment="RIPESTAT_URL=https://stat.ripe.net/data/country-resource-list/data.json?resource=ru"
-Environment="LOCAL_AS=64888"
-ExecStart=/usr/bin/python3 /usr/local/bin/prefix_updater.py
+ExecStart=/usr/bin/python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py
 User=root
 Restart=on-failure
 RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
-
