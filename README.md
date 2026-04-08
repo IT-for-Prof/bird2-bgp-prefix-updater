@@ -120,6 +120,8 @@ cd bird2-bgp-prefix-updater
 | **108** | **ByteDance** | Префиксы AS396986 (ByteDance) |
 | **109** | **Akamai** | Префиксы AS20940 (Akamai) |
 | **110** | **Roblox** | Префиксы AS22697 (Roblox) |
+| **111** | **Pinterest** | Префиксы AS53620 (Pinterest) |
+| **112** | **Fastly** | Префиксы AS54113 (Fastly CDN) |
 
 ## Примеры фильтрации (BIRD2)
 
@@ -129,7 +131,7 @@ cd bird2-bgp-prefix-updater
 Отдавать российские сети (community 100), исключая те, что попали в списки блокировок (101-110):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..110)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -141,7 +143,7 @@ filter export_only_ru {
 1. **Только чистый RU** (без заблокированных префиксов):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..110)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -151,7 +153,7 @@ filter export_only_ru {
 ```bird
 filter export_comm101_110 {
     if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..110)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
     reject;
 }
 ```
@@ -160,7 +162,7 @@ filter export_comm101_110 {
 Элегантный способ разрешить все спец-сети (101-110) одной строкой без дополнительных проверок:
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..110)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
     reject;
 }
 ```

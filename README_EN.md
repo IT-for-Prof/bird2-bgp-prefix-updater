@@ -141,6 +141,8 @@ Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 | **108** | **ByteDance** | AS396986 (ByteDance) prefixes |
 | **109** | **Akamai** | AS20940 (Akamai) prefixes |
 | **110** | **Roblox** | AS22697 (Roblox) prefixes |
+| **111** | **Pinterest** | AS53620 (Pinterest) prefixes |
+| **112** | **Fastly** | AS54113 (Fastly CDN) prefixes |
 
 ## Filtering Examples (BIRD2)
 
@@ -148,7 +150,7 @@ Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 Export Russian networks (community 100), excluding those found in blocked lists (101-110):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..110)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -160,7 +162,7 @@ If a prefix is both Russian (100) and Blocked (101-110), these filters ensure it
 1. **Clean RU Only** (no blocked prefixes):
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..110)]) then reject;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
     if (COMM_RU_COMBINED ~ bgp_community) then accept;
     reject;
 }
@@ -170,7 +172,7 @@ filter export_only_ru {
 ```bird
 filter export_comm101_110 {
     if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..110)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
     reject;
 }
 ```
@@ -178,7 +180,7 @@ filter export_comm101_110 {
 ### All special networks (range 101-110)
 ```bird
 filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..110)]) then accept;
+    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
     reject;
 }
 ```
