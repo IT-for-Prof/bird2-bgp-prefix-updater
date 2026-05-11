@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-05-11
+### Changed
+- **BREAKING: BGP community renumbering by semantic group (hundreds-based scheme).** Community IDs are now grouped by meaning rather than assignment order:
+  - `100..199` — Russian resources (route via local Russian channel)
+  - `200..299` — RKN-blocked subnets (route around blocking)
+  - `300..399` — Foreign services (also routed around blocking)
+- **Why:** `gov_networks` (`govno.lst`) is a Russian government resource and logically belongs with RU Combined, not in the same range as foreign blocked services like Stripe, Cloudflare or Akamai. Filters using a single `101..112` range incorrectly bundled gov networks with foreign services. The new scheme makes filter ranges self-documenting.
+- Old → new community ID mapping:
+  - `100` → `100` ru_combined (unchanged)
+  - `103` → **`110`** gov_networks (moved into RU group)
+  - `106` → `200` blocked_ip
+  - `102` → `210` rkn_subnets
+  - `105` → `220` blocked_sum (commented-out)
+  - `101` → `230` blocked_smart (commented-out)
+  - `104` → `300` official_services (Telegram/Cloudflare/Google/local custom.lst)
+  - `104` → **`310`** custom_user (now distinct from official_services)
+  - `107` → `320` stripe_networks
+  - `108` → `330` bytedance_as396986
+  - `109` → `340` akamai_as20940
+  - `110` → `350` roblox_as22697
+  - `111` → `360` pinterest_as53620
+  - `112` → `370` fastly_as54113
+- BIRD filters in `conf/bird.conf` rewritten to use the new ranges:
+  - `export_only_ru` now accepts `100..199` (was: accept 100, reject 101..112)
+  - `export_blocked_lists` now accepts `200..399` (was: accept 101..112)
+  - Added `export_blocked_only` (`200..299`) and `export_services_only` (`300..399`) for finer control
+- README.md and README_EN.md now include cross-language navigation links at the top and reflect the new community scheme.
+- `USER_AGENT` bumped to `BIRD2-BGP-Prefix-Updater/3.2`.
+
+### Migration
+1. Pull latest: `git pull`.
+2. Install new files: `install -m644 conf/bird.conf /etc/bird/bird.conf && install -m755 src/prefix_updater.py /usr/local/bin/prefix_updater.py`.
+3. Regenerate prefixes: `/usr/local/bin/prefix_updater.py` (or wait for the timer).
+4. Reload BIRD: `birdc configure`.
+5. **Update downstream consumers** (Mikrotik / FRR / pfSense match rules): replace old IDs with the new ones from the mapping above. Anything matching `64888:101..112` must be re-mapped to the appropriate `2xx`/`3xx` ID. Anything matching `64888:103` (gov_networks) is now `64888:110` and belongs to the RU group.
+
 ## [3.1.0] - 2026-04-08
 ### Added
 - Added download of AS53620 (Pinterest) prefixes via RIPEstat API (Community 111).
