@@ -1,5 +1,7 @@
 # BIRD2-BGP-Prefix-Updater (Multi-Source Aggregator)
 
+[🇷🇺 Русский](README.md) · [🇬🇧 English](README_EN.md) · [itforprof.com](https://itforprof.com)
+
 Автоматический агрегатор BGP-префиксов из нескольких источников (RIPEstat, Antifilter.network, Antifilter.download) с поддержкой BGP Community, автоматической оптимизацией (collapse) и отказоустойчивостью.
 
 ## Основные возможности
@@ -105,64 +107,77 @@ cd bird2-bgp-prefix-updater
 При `git pull` обновляется только `bird.conf` (фильтры, communities, шаблоны). Ваши локальные настройки и пиры не затрагиваются.
 
 ## BGP Communities
-Скрипт помечает маршруты следующими community (формат `LOCAL_AS:ID`):
 
+Маршруты помечаются community в формате `LOCAL_AS:ID`. ID разбиты на семантические группы по сотням:
+
+| Диапазон | Назначение |
+| :--- | :--- |
+| **100..199** | Российские ресурсы — обычно маршрутизируются через локальный канал |
+| **200..299** | Заблокированные РКН подсети — маршрутизируются в обход блокировок |
+| **300..399** | Зарубежные сервисы — также обычно маршрутизируются в обход блокировок |
+
+### Российские ресурсы (100..199)
 | ID | Название | Описание |
 | :--- | :--- | :--- |
 | **100** | **RU Combined** | Все IPv4 сети РФ (из RIPEstat) |
-| **101** | **Blocked Smart** | Суммаризация списков РКН по сетям от /32 до /23 (`ipsmart.lst`) |
-| **102** | **RKN Subnets** | Подсети из официальных списков Antifilter |
-| **103** | **Gov Networks** | Сети государственных структур и ведомств |
-| **104** | **Custom User** | **Telegram, Cloudflare, Google** и `custom.lst` Antifilter |
-| **105** | **Reserved** | Зарезервировано для будущих нужд |
-| **106** | **Blocked IP** | Список IP (`ip.lst`) Antifilter |
-| **107** | **Stripe IP** | Сети Stripe (API, Webhooks, etc) |
-| **108** | **ByteDance** | Префиксы AS396986 (ByteDance) |
-| **109** | **Akamai** | Префиксы AS20940 (Akamai) |
-| **110** | **Roblox** | Префиксы AS22697 (Roblox) |
-| **111** | **Pinterest** | Префиксы AS53620 (Pinterest) |
-| **112** | **Fastly** | Префиксы AS54113 (Fastly CDN) |
+| **110** | **Gov Networks** | Сети госструктур и ведомств (`govno.lst`) |
+
+### Заблокированные РКН подсети (200..299)
+| ID | Название | Описание |
+| :--- | :--- | :--- |
+| **200** | **Blocked IP** | Список IP (`ip.lst`) Antifilter |
+| **210** | **RKN Subnets** | Подсети из официальных списков Antifilter |
+| **220** | **Blocked Sum** | Суммаризация списков (`ipsum.lst`, опционально) |
+| **230** | **Blocked Smart** | Суммаризация РКН от /32 до /23 (`ipsmart.lst`, опционально) |
+
+### Зарубежные сервисы (300..399)
+| ID | Название | Описание |
+| :--- | :--- | :--- |
+| **300** | **Official Services** | **Telegram, Cloudflare, Google** и локальный `custom.lst` |
+| **310** | **Custom User** | `custom.lst` от Antifilter |
+| **320** | **Stripe** | Сети Stripe (API, Webhooks, etc) |
+| **330** | **ByteDance** | Префиксы AS396986 (ByteDance) |
+| **340** | **Akamai** | Префиксы AS20940 (Akamai) |
+| **350** | **Roblox** | Префиксы AS22697 (Roblox) |
+| **360** | **Pinterest** | Префиксы AS53620 (Pinterest) |
+| **370** | **Fastly** | Префиксы AS54113 (Fastly CDN) |
+
+> Группы разделены так, чтобы простыми диапазонами community разводить разные категории по разным пирам. Например, `gov_networks` (110) — это российские госресурсы, и они логически в одной группе с RU Combined (100), а не в одном диапазоне с зарубежными блокировками.
 
 ## Примеры фильтрации (BIRD2)
 
-Вы можете использовать эти community для гибкой отдачи маршрутов разным клиентам. Примеры фильтров в `bird.conf`:
+Благодаря группировке по сотням фильтры читаются как естественный язык:
 
-### Моно-фильтр (только один тип)
-Отдавать российские сети (community 100), исключая те, что попали в списки блокировок (101-110):
+### Только российские ресурсы (RU Combined + Gov Networks)
+Для пиров, через которых должны идти только российские сети:
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
-    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+    if (bgp_community ~ [(MY_AS, 100..199)]) then accept;
     reject;
 }
 ```
 
-### Исключение пересечений (RU vs Blocked)
-Если префикс одновременно является и российским (100), и заблокированным (101-110), данные фильтры гарантируют отдачу только в один конкретный пиринг:
-
-1. **Только чистый RU** (без заблокированных префиксов):
+### Только блокировки и зарубежные сервисы (без РФ)
+Для пиров, через которых надо обходить блокировки, но не нужны российские префиксы:
 ```bird
-filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
-    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+filter export_blocked_lists {
+    if (bgp_community ~ [(MY_AS, 200..399)]) then accept;
     reject;
 }
 ```
 
-2. **Только блокировки** (без российских префиксов):
+### Только заблокированные подсети РКН (без зарубежных сервисов)
 ```bird
-filter export_comm101_110 {
-    if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
+filter export_blocked_only {
+    if (bgp_community ~ [(MY_AS, 200..299)]) then accept;
     reject;
 }
 ```
 
-### Мульти-фильтр (диапазон)
-Элегантный способ разрешить все спец-сети (101-110) одной строкой без дополнительных проверок:
+### Только зарубежные сервисы (без списков РКН)
 ```bird
-filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
+filter export_services_only {
+    if (bgp_community ~ [(MY_AS, 300..399)]) then accept;
     reject;
 }
 ```
@@ -171,8 +186,8 @@ filter export_special_only {
 В Routing -> Filters создайте правила на основе полученных community:
 
 ```shell
-# Пример: направить заблокированные подсети (101) в туннель
-if (bgp-communities includes 64888:101) {
+# Пример: направить заблокированные подсети РКН (210) в туннель
+if (bgp-communities includes 64888:210) {
     set gw wg0;
     accept;
 }
@@ -213,4 +228,4 @@ systemctl daemon-reload
 systemctl restart bird2-bgp-prefix-updater.service
 ```
 
-itforprof.com by Konstantin Tyutyunnik
+[itforprof.com](https://itforprof.com) by Konstantin Tyutyunnik

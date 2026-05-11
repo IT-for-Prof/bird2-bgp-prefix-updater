@@ -46,38 +46,30 @@ LOCAL_AS = _detect_local_as()
 CACHE_DIR = os.environ.get("CACHE_DIR", "/var/lib/bird/prefix-cache")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "21600"))  # 6 hours
 STALE_CACHE_MAX_AGE = int(os.environ.get("STALE_CACHE_MAX_AGE", "604800"))  # 7 days
-USER_AGENT = "Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/2.9; +itforprof.com)"
+USER_AGENT = "Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/3.2; +itforprof.com)"
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
 # Data Sources (Verified working URLs)
 SOURCES = [
+    # --- RU resources (100..199) ---
     {
         "name": "ru_combined",
         "url": "https://stat.ripe.net/data/country-resource-list/data.json?resource=ru",
         "community_suffix": 100,
         "format": "json",
     },
-    # {
-    #     "name": "blocked_smart",
-    #     "urls": [
-    #         "https://antifilter.network/download/ipsmart.lst"
-    #     ],
-    #     "community_suffix": 101,
-    #     "format": "text"
-    # },
-    # {
-    #     "name": "blocked_sum",
-    #     "urls": [
-    #         "https://antifilter.network/download/ipsum.lst"
-    #     ],
-    #     "community_suffix": 105,
-    #     "format": "text"
-    # },
+    {
+        "name": "gov_networks",
+        "url": "https://antifilter.network/download/govno.lst",
+        "community_suffix": 110,
+        "format": "text",
+    },
+    # --- RKN blocked subnets (200..299) ---
     {
         "name": "blocked_ip",
         "urls": ["https://antifilter.network/download/ip.lst"],
-        "community_suffix": 106,
+        "community_suffix": 200,
         "format": "text",
     },
     {
@@ -86,15 +78,26 @@ SOURCES = [
             "https://antifilter.network/download/subnet.lst",
             "https://antifilter.download/list/subnet.lst",
         ],
-        "community_suffix": 102,
+        "community_suffix": 210,
         "format": "text",
     },
-    {
-        "name": "gov_networks",
-        "url": "https://antifilter.network/download/govno.lst",
-        "community_suffix": 103,
-        "format": "text",
-    },
+    # {
+    #     "name": "blocked_sum",
+    #     "urls": [
+    #         "https://antifilter.network/download/ipsum.lst"
+    #     ],
+    #     "community_suffix": 220,
+    #     "format": "text"
+    # },
+    # {
+    #     "name": "blocked_smart",
+    #     "urls": [
+    #         "https://antifilter.network/download/ipsmart.lst"
+    #     ],
+    #     "community_suffix": 230,
+    #     "format": "text"
+    # },
+    # --- Foreign services (300..399) ---
     {
         "name": "official_services",
         "urls": [
@@ -103,13 +106,13 @@ SOURCES = [
             "https://www.gstatic.com/ipranges/goog.txt",
             "/etc/bird/custom.lst",  # Local file
         ],
-        "community_suffix": 104,
+        "community_suffix": 300,
         "format": "text",
     },
     {
         "name": "custom_user",
         "url": "https://antifilter.network/downloads/custom.lst",
-        "community_suffix": 104,
+        "community_suffix": 310,
         "format": "text",
     },
     {
@@ -119,37 +122,37 @@ SOURCES = [
             "https://stripe.com/files/ips/ips_armada_gator.txt",
             "https://stripe.com/files/ips/ips_webhooks.txt",
         ],
-        "community_suffix": 107,
+        "community_suffix": 320,
         "format": "text",
     },
     {
         "name": "bytedance_as396986",
         "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS396986",
-        "community_suffix": 108,
+        "community_suffix": 330,
         "format": "json",
     },
     {
         "name": "akamai_as20940",
         "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS20940",
-        "community_suffix": 109,
+        "community_suffix": 340,
         "format": "json",
     },
     {
         "name": "roblox_as22697",
         "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS22697",
-        "community_suffix": 110,
+        "community_suffix": 350,
         "format": "json",
     },
     {
         "name": "pinterest_as53620",
         "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS53620",
-        "community_suffix": 111,
+        "community_suffix": 360,
         "format": "json",
     },
     {
         "name": "fastly_as54113",
         "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS54113",
-        "community_suffix": 112,
+        "community_suffix": 370,
         "format": "json",
     },
 ]

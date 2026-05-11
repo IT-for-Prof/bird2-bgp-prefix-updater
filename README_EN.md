@@ -1,5 +1,7 @@
 # BIRD2-BGP-Prefix-Updater (EN)
 
+[🇷🇺 Русский](README.md) · [🇬🇧 English](README_EN.md) · [itforprof.com](https://itforprof.com)
+
 Automates downloading, validating, and serving BGP prefixes from RIPEstat and various other sources (Antifilter, official service lists) using BIRD2 with built-in resilience and error handling.
 
 ## Features
@@ -126,61 +128,77 @@ systemctl restart bird2-bgp-prefix-updater.service
 ```
 
 ## BGP Communities
-Routes are tagged with the following communities (format `LOCAL_AS:ID`):
 
+Routes are tagged with communities in the format `LOCAL_AS:ID`. IDs are organized into semantic groups by hundreds:
+
+| Range | Purpose |
+| :--- | :--- |
+| **100..199** | Russian resources — usually routed via the local Russian channel |
+| **200..299** | RKN-blocked subnets — routed around the blocking |
+| **300..399** | Foreign services — also usually routed around the blocking |
+
+### Russian resources (100..199)
 | ID | Name | Description |
 | :--- | :--- | :--- |
 | **100** | **RU Combined** | All IPv4 networks of Russia (RIPEstat) |
-| **101** | **Blocked Smart** | RKN list summarized by networks from /32 to /23 (`ipsmart.lst`) |
-| **102** | **RKN Subnets** | Subnets from Antifilter's official lists |
-| **103** | **Gov Networks** | Networks of government structures and agencies |
-| **104** | **Custom User** | **Telegram, Cloudflare, Google** and Antifilter's `custom.lst` |
-| **105** | **Reserved** | Reserved for future use |
-| **106** | **Blocked IP** | IP list (`ip.lst`) from Antifilter |
-| **107** | **Stripe IP** | Stripe networks (API, Webhooks, etc) |
-| **108** | **ByteDance** | AS396986 (ByteDance) prefixes |
-| **109** | **Akamai** | AS20940 (Akamai) prefixes |
-| **110** | **Roblox** | AS22697 (Roblox) prefixes |
-| **111** | **Pinterest** | AS53620 (Pinterest) prefixes |
-| **112** | **Fastly** | AS54113 (Fastly CDN) prefixes |
+| **110** | **Gov Networks** | Government networks (`govno.lst`) |
+
+### RKN-blocked subnets (200..299)
+| ID | Name | Description |
+| :--- | :--- | :--- |
+| **200** | **Blocked IP** | IP list (`ip.lst`) from Antifilter |
+| **210** | **RKN Subnets** | Subnets from Antifilter's official lists |
+| **220** | **Blocked Sum** | Summarized list (`ipsum.lst`, optional) |
+| **230** | **Blocked Smart** | RKN summarized /32 to /23 (`ipsmart.lst`, optional) |
+
+### Foreign services (300..399)
+| ID | Name | Description |
+| :--- | :--- | :--- |
+| **300** | **Official Services** | **Telegram, Cloudflare, Google** and local `custom.lst` |
+| **310** | **Custom User** | Antifilter's `custom.lst` |
+| **320** | **Stripe** | Stripe networks (API, Webhooks, etc) |
+| **330** | **ByteDance** | AS396986 (ByteDance) prefixes |
+| **340** | **Akamai** | AS20940 (Akamai) prefixes |
+| **350** | **Roblox** | AS22697 (Roblox) prefixes |
+| **360** | **Pinterest** | AS53620 (Pinterest) prefixes |
+| **370** | **Fastly** | AS54113 (Fastly CDN) prefixes |
+
+> Groups are split so that simple community ranges can route different categories to different peers. For example, `gov_networks` (110) is a Russian government resource, so it logically belongs in the same group as RU Combined (100), not bundled with foreign blocked services.
 
 ## Filtering Examples (BIRD2)
 
-### Only Russia (community 100)
-Export Russian networks (community 100), excluding those found in blocked lists (101-110):
+Thanks to the by-hundreds grouping, filters read like natural language:
+
+### Russian resources only (RU Combined + Gov Networks)
+For peers that should carry only Russian networks:
 ```bird
 filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
-    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+    if (bgp_community ~ [(MY_AS, 100..199)]) then accept;
     reject;
 }
 ```
 
-### Mutual Exclusion (RU vs Blocked)
-If a prefix is both Russian (100) and Blocked (101-110), these filters ensure it's only exported to the appropriate peer:
-
-1. **Clean RU Only** (no blocked prefixes):
+### Blocked subnets + foreign services (no Russian prefixes)
+For peers that need to bypass RKN blocking but should not get RU prefixes:
 ```bird
-filter export_only_ru {
-    if (bgp_community ~ [(MY_AS, 101..112)]) then reject;
-    if (COMM_RU_COMBINED ~ bgp_community) then accept;
+filter export_blocked_lists {
+    if (bgp_community ~ [(MY_AS, 200..399)]) then accept;
     reject;
 }
 ```
 
-2. **Blocked Only** (no Russian prefixes):
+### RKN-blocked subnets only (without foreign services)
 ```bird
-filter export_comm101_110 {
-    if (COMM_RU_COMBINED ~ bgp_community) then reject;
-    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
+filter export_blocked_only {
+    if (bgp_community ~ [(MY_AS, 200..299)]) then accept;
     reject;
 }
 ```
 
-### All special networks (range 101-110)
+### Foreign services only (without RKN blocked lists)
 ```bird
-filter export_special_only {
-    if (bgp_community ~ [(MY_AS, 101..112)]) then accept;
+filter export_services_only {
+    if (bgp_community ~ [(MY_AS, 300..399)]) then accept;
     reject;
 }
 ```
@@ -286,5 +304,5 @@ The script caches downloaded lists in `/tmp/bird2-prefix-cache` for **1 hour**. 
   - In client settings: look for "password", "tcp-md5-key", or "secret" fields.
 - Export limit `20000` is set to protect clients from route table overflow.
 
-itforprof.com by Konstantin Tyutyunnik
+[itforprof.com](https://itforprof.com) by Konstantin Tyutyunnik
 
