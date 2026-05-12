@@ -235,10 +235,89 @@ router bgp 65001
   neighbor <BIRD_IP> ebgp-multihop 2
 ```
 
-### MikroTik
+### MikroTik RouterOS 7
+
+Full example of a client that receives prefixes from BIRD and routes traffic through a chosen gateway. Filtering by traffic type (RU / blocked / foreign services) is done on the BIRD side via `export filter` in `peers.d/`.
+
+**Placeholders (replace with your values):**
+
+| Placeholder | Meaning |
+|---|---|
+| `BIRD_IP` | BIRD server address (public or private — does not matter) |
+| `MY_ROUTER_ID` | Router-ID of MikroTik, any unique IPv4 |
+| `GW_ADDR` | Gateway for traffic forwarding (VPN tunnel IP, ZeroTier, physical interface, etc.) |
+| `LOCAL_AS` | Client AS (see `peers.d/*.conf` on the server) |
+| `REMOTE_AS` | BIRD server AS (`MY_AS` from `local-settings.conf`) |
+
+> `BIRD_IP` and `GW_ADDR` are **different networks**. The BGP session may go through one channel (e.g., internet), while traffic for received routes flows through another (VPN tunnel).
+
+> **Dynamic client:** if MikroTik has no static address — use `neighbor range X.X.X.X/Y as ... ; dynamic name "...";` on the BIRD side (see `peers.d/LAN.conf`).
+
+#### 1. BGP connection
+
+```shell
+/routing bgp connection
+add name=bird-server \
+    as=LOCAL_AS \
+    router-id=MY_ROUTER_ID \
+    local.role=ebgp \
+    remote.address=BIRD_IP/32 \
+    remote.as=REMOTE_AS \
+    multihop=yes \
+    connect=yes listen=no \
+    input.filter=bgp-in \
+    input.ignore-as-path-len=yes \
+    output.filter-chain=discard \
+    routing-table=main
 ```
-/routing bgp connection add name=rs remote.address=<BIRD_IP> remote.as=65000 \
-    local.address=<YOUR_IP> multihop=yes
+
+| Parameter | Purpose |
+|---|---|
+| `multihop=yes` | BIRD is configured with `multihop` — there may be multiple hops between them |
+| `connect=yes listen=no` | MikroTik initiates the connection, BIRD is passive (`passive on`) |
+| `output.filter-chain=discard` | Do not advertise routes back to BIRD |
+| `input.ignore-as-path-len=yes` | Bypass AS-path length check for multihop |
+
+#### 2. Route filters
+
+```shell
+/routing filter rule
+# discard chain — rejects everything (used in output.filter-chain above)
+add chain=discard rule="reject;"
+
+# bgp-in chain — processes incoming routes from BIRD
+# Safety: do not hijack the BGP peer itself
+add chain=bgp-in rule="if (dst in BIRD_IP/32) { reject; }"
+
+# All received routes — through the chosen gateway
+add chain=bgp-in rule="set gw GW_ADDR; accept;"
+
+# Default deny
+add chain=bgp-in rule="reject;"
+```
+
+`GW_ADDR` can be an IP address or an interface name (`wg-tunnel`, `gre-tunnel1`, `zerotier1`).
+
+#### 3. Route to the gateway (optional)
+
+If `GW_ADDR` is reachable only via some interface/tunnel and is not auto-resolved — add a static route:
+
+```shell
+/ip route
+add dst-address=GW_ADDR/32 gateway=<your-tunnel-iface-or-ip> check-gateway=ping
+```
+
+#### 4. Verification
+
+```shell
+# BGP session state (must be established)
+/routing bgp session print
+
+# Number of accepted routes
+/ip route print count-only where bgp
+
+# Specific route
+/ip route print where dst-address="149.154.160.0/20"
 ```
 
 ### Dynamic Neighbors (neighbor range)
@@ -255,15 +334,15 @@ protocol bgp any_client from t_client {
 ### Finding the source of a prefix
 If you find that an IP is blocked or allowed incorrectly, you can quickly find which list it came from:
 ```bash
-/usr/local/bin/prefix_updater.py --check 194.67.72.31
+python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --check 194.67.72.31
 ```
 The script will check all sources and output the source name, URL, and assigned Community ID.
 
 ### Caching
-The script caches downloaded lists in `/tmp/bird2-prefix-cache` for **1 hour**. This allows for fast diagnostics without re-downloading data.
+The script caches downloaded lists in `/var/lib/bird/prefix-cache` for **6 hours** (`CACHE_TTL`). When a source fails, stale cache is reused for up to 7 days (`STALE_CACHE_MAX_AGE`). Both values can be overridden via environment variables.
 - To force a cache refresh, use the `--force-refresh` flag:
   ```bash
-  /usr/local/bin/prefix_updater.py --force-refresh
+  python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --force-refresh
   ```
 
 ### General commands
