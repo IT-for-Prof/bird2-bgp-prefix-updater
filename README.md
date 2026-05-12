@@ -182,34 +182,104 @@ filter export_services_only {
 }
 ```
 
-## Примеры настройки клиентов (Mikrotik / WinBox)
-В Routing -> Filters создайте правила на основе полученных community:
+## Настройка клиента MikroTik RouterOS 7
+
+Пример настройки клиента, который получает префиксы от BIRD и заворачивает трафик через нужный шлюз. Фильтрация по типу трафика (RU / блокировки / зарубежные сервисы) задаётся на стороне BIRD через `export filter` в `peers.d/`.
+
+**Плейсхолдеры (замените на свои):**
+
+| Плейсхолдер | Что это |
+|---|---|
+| `BIRD_IP` | Адрес BIRD-сервера (публичный или приватный — неважно) |
+| `MY_ROUTER_ID` | Router-ID MikroTik, любой уникальный IPv4 |
+| `GW_ADDR` | Шлюз, через который пойдёт трафик (IP VPN-туннеля, ZeroTier, физического интерфейса и т.п.) |
+| `LOCAL_AS` | AS клиента (см. `peers.d/*.conf` на сервере) |
+| `REMOTE_AS` | AS сервера BIRD (`MY_AS` из `local-settings.conf`) |
+
+> `BIRD_IP` и `GW_ADDR` — это **разные сети**. BGP-сессия может идти через один канал (например интернет), а трафик по полученным маршрутам — через другой (VPN-туннель).
+
+> **Динамический клиент:** если MikroTik не имеет статического адреса — на стороне BIRD используйте `neighbor range X.X.X.X/Y as ... ; dynamic name "...";` (см. пример в `peers.d/LAN.conf`).
+
+### 1. BGP-соединение
 
 ```shell
-# Пример: направить заблокированные подсети РКН (210) в туннель
-if (bgp-communities includes 64888:210) {
-    set gw wg0;
-    accept;
-}
-# Пример: игнорировать российские сети (100)
-if (bgp-communities includes 64888:100) {
-    reject;
-}
+/routing bgp connection
+add name=bird-server \
+    as=LOCAL_AS \
+    router-id=MY_ROUTER_ID \
+    local.role=ebgp \
+    remote.address=BIRD_IP/32 \
+    remote.as=REMOTE_AS \
+    multihop=yes \
+    connect=yes listen=no \
+    input.filter=bgp-in \
+    input.ignore-as-path-len=yes \
+    output.filter-chain=discard \
+    routing-table=main
+```
+
+| Параметр | Зачем |
+|---|---|
+| `multihop=yes` | BIRD настроен с `multihop` — между ними может быть несколько хопов |
+| `connect=yes listen=no` | MikroTik инициирует соединение, BIRD пассивный (`passive on`) |
+| `output.filter-chain=discard` | Не анонсировать маршруты обратно в BIRD |
+| `input.ignore-as-path-len=yes` | Обход проверки AS-path при multihop |
+
+### 2. Фильтры маршрутов
+
+```shell
+/routing filter rule
+# Цепочка discard — отбрасывает всё (используется в output.filter-chain выше)
+add chain=discard rule="reject;"
+
+# Цепочка bgp-in — обрабатывает входящие маршруты от BIRD
+# Защита: не перехватывать сам BGP-пир
+add chain=bgp-in rule="if (dst in BIRD_IP/32) { reject; }"
+
+# Все полученные маршруты — через нужный шлюз
+add chain=bgp-in rule="set gw GW_ADDR; accept;"
+
+# Запрет по умолчанию
+add chain=bgp-in rule="reject;"
+```
+
+`GW_ADDR` может быть IP-адресом или именем интерфейса (`wg-tunnel`, `gre-tunnel1`, `zerotier1`).
+
+### 3. Маршрут до шлюза (опционально)
+
+Если `GW_ADDR` сам доступен только через какой-то интерфейс/туннель и автоматически не резолвится — добавьте статический маршрут:
+
+```shell
+/ip route
+add dst-address=GW_ADDR/32 gateway=<your-tunnel-iface-or-ip> check-gateway=ping
+```
+
+### 4. Проверка
+
+```shell
+# Состояние BGP-сессии (должна быть established)
+/routing bgp session print
+
+# Количество принятых маршрутов
+/ip route print count-only where bgp
+
+# Конкретный маршрут
+/ip route print where dst-address="149.154.160.0/20"
 ```
 
 ## Диагностика и отладка
 ### Поиск источника префикса
 Если вы обнаружили, что какой-то IP заблокирован или разрешен ошибочно, вы можете быстро найти, из какого списка он пришел:
 ```bash
-/usr/local/bin/prefix_updater.py --check 194.67.72.31
+python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --check 194.67.72.31
 ```
 Скрипт проверит все источники и выведет название списка, URL и присваиваемый Community ID.
 
 ### Кэширование
-Скрипт кэширует скачанные списки в `/tmp/bird2-prefix-cache` на **1 час**. Это позволяет быстро проводить диагностику без повторного скачивания данных.
+Скрипт кэширует скачанные списки в `/var/lib/bird/prefix-cache` на **6 часов** (`CACHE_TTL`). При сбое источника используется устаревший кэш до 7 дней (`STALE_CACHE_MAX_AGE`). Оба значения можно переопределить через переменные окружения.
 - Для принудительного обновления кэша используйте флаг `--force-refresh`:
   ```bash
-  /usr/local/bin/prefix_updater.py --force-refresh
+  python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --force-refresh
   ```
 
 ### Общие команды
@@ -222,10 +292,15 @@ if (bgp-communities includes 64888:100) {
 ```bash
 cd /opt/bird2-bgp-prefix-updater
 git pull
-# Переустановите скрипт и юнит (если были изменения)
-install -m755 src/prefix_updater.py /usr/local/bin/prefix_updater.py
+# Сервис запускает скрипт напрямую из этого каталога — копировать не нужно.
+# Если менялся systemd-юнит или bird.conf — переустановите их:
+install -m644 systemd/bird2-bgp-prefix-updater.service /etc/systemd/system/
+install -m644 systemd/bird2-bgp-prefix-updater.timer /etc/systemd/system/
+# Внимание: bird.conf перезапишет ваши изменения, если вы редактировали его локально
+install -m644 conf/bird.conf /etc/bird/bird.conf
 systemctl daemon-reload
 systemctl restart bird2-bgp-prefix-updater.service
+birdc configure
 ```
 
 [itforprof.com](https://itforprof.com) by Konstantin Tyutyunnik
