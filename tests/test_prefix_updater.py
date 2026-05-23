@@ -103,6 +103,45 @@ def test_aws_source_is_present_with_cloudfront_filter() -> None:
     assert sources_by_name["aws_networks"]["aws_services"] == ["CLOUDFRONT"]
 
 
+def test_aws_json_parser_matches_configured_services_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    cache_file = tmp_path / "aws.cache"
+    cache_file.write_text(
+        """
+        {
+          "prefixes": [
+            {"ip_prefix": "3.10.17.128/25", "service": "CLOUDFRONT"},
+            {"ip_prefix": "52.95.245.0/24", "service": "AMAZON"}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    prefixes = prefix_updater._parse_cached_data(
+        str(cache_file),
+        {
+            "name": "aws_networks",
+            "url": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+            "community_suffix": 383,
+            "format": "aws_json",
+            "aws_services": ["cloudfront"],
+        },
+    )
+
+    assert prefixes == ["3.10.17.128/25"]
+
+
+def test_bird_config_defines_aws_cloudfront_community() -> None:
+    bird_config = MODULE_PATH.parents[1] / "conf" / "bird.conf"
+
+    assert (
+        "define COMM_AWS_CLOUDFRONT = (MY_AS, 383);"
+        in bird_config.read_text(encoding="utf-8")
+    )
+
+
 def test_main_repairs_missing_txt_when_bird_output_is_unchanged(
     monkeypatch: Any, tmp_path: Path
 ) -> None:

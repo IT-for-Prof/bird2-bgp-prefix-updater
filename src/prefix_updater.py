@@ -279,12 +279,15 @@ def parse_old_prefixes(filepath: str) -> Dict[str, Set[int]]:
 def _parse_json_prefixes(raw_data: str, source: Source) -> List[str]:
     data = json.loads(raw_data)
     if source["format"] == "aws_json":
-        aws_services = set(source.get("aws_services", []))
+        aws_services = {service.upper() for service in source.get("aws_services", [])}
         return [
             item["ip_prefix"]
             for item in data.get("prefixes", [])
             if "ip_prefix" in item
-            and (not aws_services or item.get("service") in aws_services)
+            and (
+                not aws_services
+                or str(item.get("service", "")).upper() in aws_services
+            )
         ]
 
     d = data.get("data", {})
