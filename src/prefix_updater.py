@@ -45,7 +45,7 @@ LOCAL_AS = _detect_local_as()
 CACHE_DIR = os.environ.get("CACHE_DIR", "/var/lib/bird/prefix-cache")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "21600"))  # 6 hours
 STALE_CACHE_MAX_AGE = int(os.environ.get("STALE_CACHE_MAX_AGE", "604800"))  # 7 days
-USER_AGENT = "Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/3.2; +itforprof.com)"
+USER_AGENT = "Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/3.3; +itforprof.com)"
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -82,22 +82,6 @@ SOURCES: List[Source] = [
         "community_suffix": 210,
         "format": "text",
     },
-    # {
-    #     "name": "blocked_sum",
-    #     "urls": [
-    #         "https://antifilter.network/download/ipsum.lst"
-    #     ],
-    #     "community_suffix": 220,
-    #     "format": "text"
-    # },
-    # {
-    #     "name": "blocked_smart",
-    #     "urls": [
-    #         "https://antifilter.network/download/ipsmart.lst"
-    #     ],
-    #     "community_suffix": 230,
-    #     "format": "text"
-    # },
     # --- Foreign services (300..399) ---
     {
         "name": "official_services",

@@ -12,7 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Replaced permissive IPv4 parsing with strict `ipaddress`-based validation.
 - Replaced shell-based BIRD commands with argv-based `subprocess.run` calls.
-- Write `prefixes.txt` only after the generated BIRD configuration passes smoke testing.
+- Write `prefixes.txt` only after the generated BIRD configuration passes smoke testing, and repair it when the BIRD output is unchanged but the text output is missing or stale.
+- Treat Netflix and YouTube as all-or-fallback multi-AS sources so partial RIPEstat failures do not publish partial service communities.
+- Removed stale current-facing documentation for unsupported `RIPESTAT_URL` overrides and corrected the documented BIRD export limit.
+- Bumped `USER_AGENT` to `BIRD2-BGP-Prefix-Updater/3.3`.
+
+### Removed
+- Removed inactive `blocked_sum` / `blocked_smart` source stubs and unused BIRD constants for communities `220` and `230`.
+- Replaced the active LastPass sample entries in `conf/custom.lst` with commented examples so new installs start with an empty local custom list.
 
 ## [3.2.0] - 2026-05-11
 ### Changed
@@ -26,8 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `103` → **`110`** gov_networks (moved into RU group)
   - `106` → `200` blocked_ip
   - `102` → `210` rkn_subnets
-  - `105` → `220` blocked_sum (commented-out)
-  - `101` → `230` blocked_smart (commented-out)
   - `104` → `300` official_services (Telegram/Cloudflare/Google/local custom.lst)
   - `104` → **`310`** custom_user (now distinct from official_services)
   - `107` → `320` stripe_networks
@@ -45,8 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Migration
 1. Pull latest: `git pull`.
-2. Install new files: `install -m644 conf/bird.conf /etc/bird/bird.conf && install -m755 src/prefix_updater.py /usr/local/bin/prefix_updater.py`.
-3. Regenerate prefixes: `/usr/local/bin/prefix_updater.py` (or wait for the timer).
+2. Install new files: `install -m644 conf/bird.conf /etc/bird/bird.conf && install -m644 systemd/bird2-bgp-prefix-updater.service /etc/systemd/system/ && install -m644 systemd/bird2-bgp-prefix-updater.timer /etc/systemd/system/`.
+3. Regenerate prefixes: `python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py` (or wait for the timer).
 4. Reload BIRD: `birdc configure`.
 5. **Update downstream consumers** (Mikrotik / FRR / pfSense match rules): replace old IDs with the new ones from the mapping above. Anything matching `64888:101..112` must be re-mapped to the appropriate `2xx`/`3xx` ID. Anything matching `64888:103` (gov_networks) is now `64888:110` and belongs to the RU group.
 
@@ -98,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.7.0] - 2026-01-05
 ### Added
 - Добавлено скачивание префиксов AS396986 (ByteDance) через RIPEstat API (Community 108).
-- Поддержка локальных файлов в `prefix_updater.py` (добавлен `conf/custom.lst` для IP LastPass).
+- Поддержка локальных файлов в `prefix_updater.py` (добавлен `conf/custom.lst`).
 - Улучшена обработка JSON в `prefix_updater.py` (поддержка `announced-prefixes`).
 - Обновлены фильтры BIRD для поддержки диапазона Community 101..108.
 

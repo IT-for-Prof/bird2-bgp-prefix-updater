@@ -49,6 +49,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
 cover/
 
 # Translations
@@ -158,6 +159,9 @@ dmypy.json
 .pytype/
 
 # Cython debug symbols
+
+# Local assistant/tool state
+.serena/
 cython_debug/
 
 # PyCharm

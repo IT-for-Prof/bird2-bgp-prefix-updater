@@ -10,6 +10,8 @@
 - **Автоопределение MY_AS**: Чтение номера AS из конфигурации BIRD автоматически
 - **Разделение конфигурации**: `bird.conf` из git + локальные настройки в отдельных файлах
 - **Улучшенное логирование**: Детальные таблицы статуса, разбивка по community, тайминг
+- **Строгая IPv4-валидация**: Некорректные IPv4/CIDR формы не принимаются как legacy shorthand
+- **Цельные multi-AS группы**: Netflix и YouTube обновляются только если все обязательные RIPEstat AS-источники доступны; иначе сохраняются старые маршруты community
 
 ## Требования
 - Linux (Debian/Ubuntu или RHEL/Alma/CentOS).
@@ -28,6 +30,7 @@
 ## Файлы проекта
 - `src/prefix_updater.py` — скрипт агрегации.
 - `conf/bird.conf` — шаблон конфигурации BIRD.
+- `conf/custom.lst` — комментированный шаблон для локальных IPv4-префиксов.
 - `systemd/bird2-bgp-prefix-updater.service` — юнит сервиса.
 - `systemd/bird2-bgp-prefix-updater.timer` — юнит таймера.
 - Рабочие файлы:
@@ -101,10 +104,27 @@ cd bird2-bgp-prefix-updater
   local-settings.conf       ← ваши настройки (router id, MY_AS, logging)
   peers.d/*.conf            ← ваши BGP пиры (не перезаписываются)
   prefixes.bird             ← автогенерация скриптом
-  custom.lst                ← ваши кастомные IP
+  custom.lst                ← ваши кастомные IP (изначально комментированный шаблон)
 ```
 
-При `git pull` обновляется только `bird.conf` (фильтры, communities, шаблоны). Ваши локальные настройки и пиры не затрагиваются.
+При `git pull` меняется только копия репозитория в `/opt/bird2-bgp-prefix-updater`.
+Файлы `/etc/bird/local-settings.conf` и `/etc/bird/peers.d/*.conf` не хранятся в репозитории и не перезаписываются.
+Переустанавливайте `conf/bird.conf` и systemd-юниты только когда хотите применить обновлённые шаблоны из git.
+
+## Конфигурация BIRD и переменные окружения
+
+Сгенерированный include-файл: `/etc/bird/prefixes.bird`. Маршруты загружаются в таблицу `t_bgp_prefixes`.
+
+| Настройка | Значение по умолчанию | Назначение |
+| :--- | :--- | :--- |
+| `MY_AS` в `/etc/bird/local-settings.conf` | fallback `64888` | AS для BGP community |
+| `LOCAL_AS` env | не задано | Переопределяет автоопределение `MY_AS` |
+| `OUTPUT_BIRD` | `/etc/bird/prefixes.bird` | Генерируемые static routes для BIRD |
+| `OUTPUT_TXT` | `/var/lib/bird/prefixes.txt` | Генерируемый plain CIDR список |
+| `BIRD_CONF` | `/etc/bird/bird.conf` | Конфиг для smoke-test и автоопределения AS |
+| `CACHE_DIR` | `/var/lib/bird/prefix-cache` | Каталог кэша загрузок |
+| `CACHE_TTL` | `21600` | Время жизни свежего кэша в секундах |
+| `STALE_CACHE_MAX_AGE` | `604800` | Максимальный возраст stale cache при сбоях загрузки |
 
 ## BGP Communities
 
@@ -127,8 +147,6 @@ cd bird2-bgp-prefix-updater
 | :--- | :--- | :--- |
 | **200** | **Blocked IP** | Список IP (`ip.lst`) Antifilter |
 | **210** | **RKN Subnets** | Подсети из официальных списков Antifilter |
-| **220** | **Blocked Sum** | Суммаризация списков (`ipsum.lst`, опционально) |
-| **230** | **Blocked Smart** | Суммаризация РКН от /32 до /23 (`ipsmart.lst`, опционально) |
 
 ### Зарубежные сервисы (300..399)
 | ID | Название | Описание |
@@ -143,10 +161,16 @@ cd bird2-bgp-prefix-updater
 | **370** | **Fastly** | Префиксы AS54113 (Fastly CDN) |
 | **380** | **Meta** | Префиксы AS32934 (Meta/Facebook) |
 | **381** | **Twitter/X** | Префиксы AS13414 (Twitter/X) |
-| **382** | **Netflix** | Префиксы AS2906 и AS40027 (Netflix) |
-| **386** | **YouTube** | Префиксы AS36040 и AS43515 (YouTube) |
+| **382** | **Netflix** | Префиксы AS2906 и AS40027 (Netflix); оба RIPEstat источника обязательны |
+| **386** | **YouTube** | Префиксы AS36040 и AS43515 (YouTube); оба RIPEstat источника обязательны |
 
 > Группы разделены так, чтобы простыми диапазонами community разводить разные категории по разным пирам. Например, `gov_networks` (110) — это российские госресурсы, и они логически в одной группе с RU Combined (100), а не в одном диапазоне с зарубежными блокировками.
+
+### Примечания по источникам
+- `ru_combined` использует RIPEstat `country-resource-list`, который возвращает ASN, IPv4 ranges/prefixes и IPv6 prefixes для страны: <https://stat-ui.stat.ripe.net/docs/data-api/api-endpoints/country-resource-list>
+- AS-источники сервисов используют RIPEstat `announced-prefixes`, который возвращает анонсируемые префиксы для заданного ASN: <https://stat-ui.stat.ripe.net/docs/data-api/api-endpoints/announced-prefixes>
+- `rkn_subnets` использует два mirror URL и допускает частичный успех. Netflix и YouTube состоят из нескольких AS-источников и обновляют community только если все URL успешно обработаны.
+- `official_services` объединяет Telegram, Cloudflare, Google и локальный `/etc/bird/custom.lst` в community `300`; remote `custom.lst` от Antifilter остаётся отдельной community `310`.
 
 ## Примеры фильтрации (BIRD2)
 
