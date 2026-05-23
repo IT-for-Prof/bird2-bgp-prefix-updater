@@ -176,6 +176,7 @@ SOURCES: List[Source] = [
         ],
         "community_suffix": 382,
         "format": "json",
+        "require_all_urls": True,
     },
     {
         "name": "youtube_as36040_as43515",
@@ -185,6 +186,7 @@ SOURCES: List[Source] = [
         ],
         "community_suffix": 386,
         "format": "json",
+        "require_all_urls": True,
     },
 ]
 
@@ -573,7 +575,7 @@ Examples:
                 all_src_prefixes.extend(result)
                 any_success = True
 
-        if not any_success:
+        if not any_success or (failed_urls and src.get("require_all_urls")):
             failed_communities.add(src["community_suffix"])
             # Count old routes for this community
             old_count = sum(
@@ -686,9 +688,18 @@ Examples:
         with open(OUTPUT_BIRD, "r", encoding="utf-8") as f:
             old_hash = hashlib.sha256(f.read().encode()).hexdigest()
 
+    txt_hash = hashlib.sha256(txt_content.encode()).hexdigest()
+    old_txt_hash = ""
+    if os.path.exists(OUTPUT_TXT):
+        with open(OUTPUT_TXT, "r", encoding="utf-8") as f:
+            old_txt_hash = hashlib.sha256(f.read().encode()).hexdigest()
+
     elapsed = time.time() - start_time
 
-    if new_hash == old_hash:
+    needs_bird_write = new_hash != old_hash
+    needs_txt_write = txt_hash != old_txt_hash
+
+    if not needs_bird_write and not needs_txt_write:
         failed = sum(1 for _, _, _, s in source_stats if s == "FALLBACK")
         ok = sum(1 for _, _, _, s in source_stats if s == "OK")
         print(
@@ -707,12 +718,16 @@ Examples:
 
     print("\nRunning smoke test...")
     if smoke_test_bird(temp_bird):
-        if os.name == "nt" and os.path.exists(OUTPUT_BIRD):
-            os.remove(OUTPUT_BIRD)
-        os.rename(temp_bird, OUTPUT_BIRD)
+        if needs_bird_write:
+            if os.name == "nt" and os.path.exists(OUTPUT_BIRD):
+                os.remove(OUTPUT_BIRD)
+            os.rename(temp_bird, OUTPUT_BIRD)
+        elif os.path.exists(temp_bird):
+            os.remove(temp_bird)
 
         # Keep prefixes.txt in sync only after the BIRD configuration is valid.
-        atomic_write(OUTPUT_TXT, txt_content)
+        if needs_txt_write:
+            atomic_write(OUTPUT_TXT, txt_content)
 
         # Reload BIRD
         try:
