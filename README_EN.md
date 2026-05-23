@@ -183,6 +183,7 @@ To add another AWS service, edit `aws_services` on the `aws_networks` source in 
 ```python
 "aws_services": ["CLOUDFRONT", "GLOBALACCELERATOR"],
 ```
+Service names are matched case-insensitively, but keeping the same spelling as AWS `ip-ranges.json` is clearer.
 Do not clear the filter without separate validation: the full AWS list is much broader than CloudFront and can materially change routing.
 
 ## Filtering Examples (BIRD2)
