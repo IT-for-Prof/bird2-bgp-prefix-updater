@@ -163,6 +163,14 @@ SOURCES: List[Source] = [
         "require_all_urls": True,
     },
     {
+        "name": "aws_networks",
+        "url": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+        "community_suffix": 383,
+        "format": "aws_json",
+        # Add AWS services here, e.g. ["CLOUDFRONT", "GLOBALACCELERATOR"].
+        "aws_services": ["CLOUDFRONT"],
+    },
+    {
         "name": "youtube_as36040_as43515",
         "urls": [
             "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS36040",
@@ -268,21 +276,34 @@ def parse_old_prefixes(filepath: str) -> Dict[str, Set[int]]:
     return result
 
 
+def _parse_json_prefixes(raw_data: str, source: Source) -> List[str]:
+    data = json.loads(raw_data)
+    if source["format"] == "aws_json":
+        aws_services = set(source.get("aws_services", []))
+        return [
+            item["ip_prefix"]
+            for item in data.get("prefixes", [])
+            if "ip_prefix" in item
+            and (not aws_services or item.get("service") in aws_services)
+        ]
+
+    d = data.get("data", {})
+    res = d.get("resources", {}).get("ipv4", [])
+    if res:
+        return res
+    prefixes = d.get("prefixes", [])
+    if prefixes:
+        return [p["prefix"] for p in prefixes if "prefix" in p]
+    return []
+
+
 def _parse_cached_data(cache_path: str, source: Source) -> Optional[List[str]]:
     """Parse a cached file for a given source. Returns list of prefixes or None on error."""
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
             raw_data = f.read()
-        if source["format"] == "json":
-            data = json.loads(raw_data)
-            d = data.get("data", {})
-            res = d.get("resources", {}).get("ipv4", [])
-            if res:
-                return res
-            prefixes = d.get("prefixes", [])
-            if prefixes:
-                return [p["prefix"] for p in prefixes if "prefix" in p]
-            return []
+        if source["format"] in {"json", "aws_json"}:
+            return _parse_json_prefixes(raw_data, source)
         else:
             return [
                 line.strip()
@@ -342,18 +363,8 @@ def download_resource(source: Source, force_refresh: bool = False) -> Optional[L
                 except Exception as e:
                     print(f"Warning: Failed to write cache: {e}")
 
-                if source["format"] == "json":
-                    data = json.loads(raw_data)
-                    d = data.get("data", {})
-                    # Path 1: country-resource-list
-                    res = d.get("resources", {}).get("ipv4", [])
-                    if res:
-                        return res
-                    # Path 2: announced-prefixes
-                    prefixes = d.get("prefixes", [])
-                    if prefixes:
-                        return [p["prefix"] for p in prefixes if "prefix" in p]
-                    return []
+                if source["format"] in {"json", "aws_json"}:
+                    return _parse_json_prefixes(raw_data, source)
                 else:
                     return [
                         line.strip()
@@ -507,6 +518,7 @@ Examples:
   %(prog)s                        # Run update (standard mode)
   %(prog)s --check 1.1.1.1        # Check which source contains this IP
   %(prog)s --check 194.67.72.0/24 # Check which source contains this subnet
+  %(prog)s --check 3.10.17.128/25 # Check an AWS CloudFront prefix
   %(prog)s --force-refresh        # Ignore cache and download all sources fresh
         """,
     )

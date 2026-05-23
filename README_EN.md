@@ -166,6 +166,7 @@ Routes are tagged with communities in the format `LOCAL_AS:ID`. IDs are organize
 | **380** | **Meta** | AS32934 (Meta/Facebook) prefixes |
 | **381** | **Twitter/X** | AS13414 (Twitter/X) prefixes |
 | **382** | **Netflix** | AS2906 and AS40027 (Netflix) prefixes; both RIPEstat sources must succeed |
+| **383** | **AWS CloudFront** | AWS `CLOUDFRONT` IPv4 prefixes from `ip-ranges.json`; this is a filtered CloudFront list, not all of AWS |
 | **386** | **YouTube** | AS36040 and AS43515 (YouTube) prefixes; both RIPEstat sources must succeed |
 
 > Groups are split so that simple community ranges can route different categories to different peers. For example, `gov_networks` (110) is a Russian government resource, so it logically belongs in the same group as RU Combined (100), not bundled with foreign blocked services.
@@ -173,8 +174,16 @@ Routes are tagged with communities in the format `LOCAL_AS:ID`. IDs are organize
 ### Source notes
 - `ru_combined` uses RIPEstat `country-resource-list`, which returns country-associated ASNs, IPv4 ranges/prefixes, and IPv6 prefixes: <https://stat-ui.stat.ripe.net/docs/data-api/api-endpoints/country-resource-list>
 - AS-based service sources use RIPEstat `announced-prefixes`, which returns announced prefixes for a requested ASN: <https://stat-ui.stat.ripe.net/docs/data-api/api-endpoints/announced-prefixes>
+- `aws_networks` uses AWS `ip-ranges.json`, reads only `prefixes[].ip_prefix`, ignores `ipv6_prefixes`, and filters to the `CLOUDFRONT` service by default: <https://ip-ranges.amazonaws.com/ip-ranges.json>
 - `rkn_subnets` uses two mirror URLs and keeps partial success. Netflix and YouTube use additive AS sources and require every URL to succeed before replacing that community.
 - `official_services` combines Telegram, Cloudflare, Google, and the local `/etc/bird/custom.lst` file into community `300`; Antifilter's remote `custom.lst` remains separate as community `310`.
+
+### Changing the AWS filter
+To add another AWS service, edit `aws_services` on the `aws_networks` source in `src/prefix_updater.py`, for example:
+```python
+"aws_services": ["CLOUDFRONT", "GLOBALACCELERATOR"],
+```
+Do not clear the filter without separate validation: the full AWS list is much broader than CloudFront and can materially change routing.
 
 ## Filtering Examples (BIRD2)
 
@@ -346,6 +355,7 @@ protocol bgp any_client from t_client {
 If you find that an IP is blocked or allowed incorrectly, you can quickly find which list it came from:
 ```bash
 python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --check 194.67.72.31
+python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --check 3.10.17.128/25
 ```
 The script will check all sources and output the source name, URL, and assigned Community ID.
 

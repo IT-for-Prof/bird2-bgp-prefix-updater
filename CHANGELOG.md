@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), and YouTube AS36040/AS43515 (`386`).
 - Added matching BIRD community constants for the new service sources.
+- Added filtered AWS CloudFront IPv4 prefixes from AWS `ip-ranges.json` as community `383`.
 
 ### Fixed
 - Replaced permissive IPv4 parsing with strict `ipaddress`-based validation.

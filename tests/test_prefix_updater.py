@@ -60,6 +60,49 @@ def test_new_ripestat_service_sources_are_present() -> None:
     }
 
 
+def test_aws_json_parser_extracts_filtered_ipv4_prefixes(tmp_path: Path) -> None:
+    cache_file = tmp_path / "aws.cache"
+    cache_file.write_text(
+        """
+        {
+          "prefixes": [
+            {"ip_prefix": "3.10.17.128/25", "service": "CLOUDFRONT"},
+            {"ip_prefix": "52.95.245.0/24", "service": "AMAZON"},
+            {"ip_prefix": "13.32.0.0/15", "service": "CLOUDFRONT"}
+          ],
+          "ipv6_prefixes": [
+            {"ipv6_prefix": "2600:9000::/28", "service": "CLOUDFRONT"}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    prefixes = prefix_updater._parse_cached_data(
+        str(cache_file),
+        {
+            "name": "aws_networks",
+            "url": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+            "community_suffix": 383,
+            "format": "aws_json",
+            "aws_services": ["CLOUDFRONT"],
+        },
+    )
+
+    assert prefixes == ["3.10.17.128/25", "13.32.0.0/15"]
+
+
+def test_aws_source_is_present_with_cloudfront_filter() -> None:
+    sources_by_name = {source["name"]: source for source in prefix_updater.SOURCES}
+
+    assert sources_by_name["aws_networks"]["url"] == (
+        "https://ip-ranges.amazonaws.com/ip-ranges.json"
+    )
+    assert sources_by_name["aws_networks"]["format"] == "aws_json"
+    assert sources_by_name["aws_networks"]["community_suffix"] == 383
+    assert sources_by_name["aws_networks"]["aws_services"] == ["CLOUDFRONT"]
+
+
 def test_main_repairs_missing_txt_when_bird_output_is_unchanged(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
@@ -100,6 +143,49 @@ def test_main_repairs_missing_txt_when_bird_output_is_unchanged(
     prefix_updater.main()
 
     assert txt_output.read_text(encoding="utf-8") == "192.0.2.0/24"
+
+
+def test_main_deduplicates_duplicate_aws_prefixes(monkeypatch: Any, tmp_path: Path) -> None:
+    bird_output = tmp_path / "prefixes.bird"
+    txt_output = tmp_path / "prefixes.txt"
+
+    monkeypatch.setattr(prefix_updater, "OUTPUT_BIRD", str(bird_output))
+    monkeypatch.setattr(prefix_updater, "OUTPUT_TXT", str(txt_output))
+    monkeypatch.setattr(
+        prefix_updater,
+        "SOURCES",
+        [
+            {
+                "name": "aws_networks",
+                "url": "https://ip-ranges.amazonaws.com/ip-ranges.json",
+                "community_suffix": 383,
+                "format": "aws_json",
+                "aws_services": ["CLOUDFRONT"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        prefix_updater,
+        "download_resource",
+        lambda source, force_refresh=False: [
+            "3.10.17.128/25",
+            "3.10.17.128/25",
+        ],
+    )
+    monkeypatch.setattr(prefix_updater, "smoke_test_bird", lambda temp_bird_file: True)
+    monkeypatch.setattr(
+        prefix_updater.subprocess,
+        "run",
+        completed_process,
+    )
+    monkeypatch.setattr(prefix_updater.sys, "argv", ["prefix_updater.py"])
+
+    prefix_updater.main()
+
+    assert bird_output.read_text(encoding="utf-8").splitlines() == [
+        "route 3.10.17.128/25 blackhole { bgp_community.add((64888, 383)); };"
+    ]
+    assert txt_output.read_text(encoding="utf-8") == "3.10.17.128/25"
 
 
 def test_require_all_urls_source_falls_back_on_partial_failure(

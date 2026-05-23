@@ -162,6 +162,7 @@ cd bird2-bgp-prefix-updater
 | **380** | **Meta** | Префиксы AS32934 (Meta/Facebook) |
 | **381** | **Twitter/X** | Префиксы AS13414 (Twitter/X) |
 | **382** | **Netflix** | Префиксы AS2906 и AS40027 (Netflix); оба RIPEstat источника обязательны |
+| **383** | **AWS CloudFront** | IPv4-префиксы AWS `CLOUDFRONT` из `ip-ranges.json`; это фильтрованный список CloudFront, не весь AWS |
 | **386** | **YouTube** | Префиксы AS36040 и AS43515 (YouTube); оба RIPEstat источника обязательны |
 
 > Группы разделены так, чтобы простыми диапазонами community разводить разные категории по разным пирам. Например, `gov_networks` (110) — это российские госресурсы, и они логически в одной группе с RU Combined (100), а не в одном диапазоне с зарубежными блокировками.
@@ -169,8 +170,16 @@ cd bird2-bgp-prefix-updater
 ### Примечания по источникам
 - `ru_combined` использует RIPEstat `country-resource-list`, который возвращает ASN, IPv4 ranges/prefixes и IPv6 prefixes для страны: <https://stat-ui.stat.ripe.net/docs/data-api/api-endpoints/country-resource-list>
 - AS-источники сервисов используют RIPEstat `announced-prefixes`, который возвращает анонсируемые префиксы для заданного ASN: <https://stat-ui.stat.ripe.net/docs/data-api/api-endpoints/announced-prefixes>
+- `aws_networks` использует AWS `ip-ranges.json`, читает только `prefixes[].ip_prefix`, игнорирует `ipv6_prefixes` и по умолчанию фильтрует только сервис `CLOUDFRONT`: <https://ip-ranges.amazonaws.com/ip-ranges.json>
 - `rkn_subnets` использует два mirror URL и допускает частичный успех. Netflix и YouTube состоят из нескольких AS-источников и обновляют community только если все URL успешно обработаны.
 - `official_services` объединяет Telegram, Cloudflare, Google и локальный `/etc/bird/custom.lst` в community `300`; remote `custom.lst` от Antifilter остаётся отдельной community `310`.
+
+### Изменение AWS-фильтра
+Чтобы добавить другой AWS-сервис, отредактируйте `aws_services` у источника `aws_networks` в `src/prefix_updater.py`, например:
+```python
+"aws_services": ["CLOUDFRONT", "GLOBALACCELERATOR"],
+```
+Не очищайте фильтр без отдельной проверки: весь список AWS намного шире CloudFront и может сильно изменить маршрутизацию.
 
 ## Примеры фильтрации (BIRD2)
 
@@ -300,6 +309,7 @@ add dst-address=GW_ADDR/32 gateway=<your-tunnel-iface-or-ip> check-gateway=ping
 Если вы обнаружили, что какой-то IP заблокирован или разрешен ошибочно, вы можете быстро найти, из какого списка он пришел:
 ```bash
 python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --check 194.67.72.31
+python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --check 3.10.17.128/25
 ```
 Скрипт проверит все источники и выведет название списка, URL и присваиваемый Community ID.
 
