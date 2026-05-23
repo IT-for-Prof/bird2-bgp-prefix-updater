@@ -162,6 +162,10 @@ Routes are tagged with communities in the format `LOCAL_AS:ID`. IDs are organize
 | **350** | **Roblox** | AS22697 (Roblox) prefixes |
 | **360** | **Pinterest** | AS53620 (Pinterest) prefixes |
 | **370** | **Fastly** | AS54113 (Fastly CDN) prefixes |
+| **380** | **Meta** | AS32934 (Meta/Facebook) prefixes |
+| **381** | **Twitter/X** | AS13414 (Twitter/X) prefixes |
+| **382** | **Netflix** | AS2906 and AS40027 (Netflix) prefixes |
+| **386** | **YouTube** | AS36040 and AS43515 (YouTube) prefixes |
 
 > Groups are split so that simple community ranges can route different categories to different peers. For example, `gov_networks` (110) is a Russian government resource, so it logically belongs in the same group as RU Combined (100), not bundled with foreign blocked services.
 
@@ -384,4 +388,3 @@ The script caches downloaded lists in `/var/lib/bird/prefix-cache` for **6 hours
 - Export limit `20000` is set to protect clients from route table overflow.
 
 [itforprof.com](https://itforprof.com) by Konstantin Tyutyunnik
-

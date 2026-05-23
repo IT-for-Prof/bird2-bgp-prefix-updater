@@ -4,16 +4,15 @@
 import json
 import urllib.request
 import urllib.error
-import socket
-import struct
 import os
 import sys
 import hashlib
-import math
 import time
 import argparse
 import re
-from typing import List, Tuple, Dict, Set, Optional
+import ipaddress
+import subprocess
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Configuration
 OUTPUT_TXT = os.environ.get("OUTPUT_TXT", "/var/lib/bird/prefixes.txt")
@@ -51,7 +50,9 @@ MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
 # Data Sources (Verified working URLs)
-SOURCES = [
+Source = Dict[str, Any]
+
+SOURCES: List[Source] = [
     # --- RU resources (100..199) ---
     {
         "name": "ru_combined",
@@ -155,46 +156,61 @@ SOURCES = [
         "community_suffix": 370,
         "format": "json",
     },
+    {
+        "name": "meta_as32934",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS32934",
+        "community_suffix": 380,
+        "format": "json",
+    },
+    {
+        "name": "twitter_as13414",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS13414",
+        "community_suffix": 381,
+        "format": "json",
+    },
+    {
+        "name": "netflix_as2906_as40027",
+        "urls": [
+            "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS2906",
+            "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS40027",
+        ],
+        "community_suffix": 382,
+        "format": "json",
+    },
+    {
+        "name": "youtube_as36040_as43515",
+        "urls": [
+            "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS36040",
+            "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS43515",
+        ],
+        "community_suffix": 386,
+        "format": "json",
+    },
 ]
 
 
 def ip_to_int(ip: str) -> int:
-    return struct.unpack("!I", socket.inet_aton(ip))[0]
+    return int(ipaddress.IPv4Address(ip))
 
 
 def int_to_ip(n: int) -> str:
-    return socket.inet_ntoa(struct.pack("!I", n))
+    return str(ipaddress.IPv4Address(n))
 
 
 def cidr_to_range(cidr: str) -> Tuple[int, int]:
     if "/" not in cidr:
         cidr = f"{cidr}/32"
-    ip, prefix = cidr.split("/")
-    prefix = int(prefix)
-    start = ip_to_int(ip)
-    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF
-    start &= mask
-    end = start + (1 << (32 - prefix)) - 1
-    return start, end
+    network = ipaddress.IPv4Network(cidr, strict=False)
+    return int(network.network_address), int(network.broadcast_address)
 
 
 def range_to_cidrs(start: int, end: int) -> List[str]:
-    cidrs: List[str] = []
-    while start <= end:
-        max_size = 32
-        if start != 0:
-            trailing_zeros = 0
-            temp_start = start
-            while temp_start % 2 == 0:
-                trailing_zeros += 1
-                temp_start //= 2
-            max_size = trailing_zeros
-        range_len = end - start + 1
-        max_from_len = int(math.log2(range_len)) if range_len > 0 else 0
-        prefix_len = 32 - min(max_size, max_from_len)
-        cidrs.append(f"{int_to_ip(start)}/{prefix_len}")
-        start += 1 << (32 - prefix_len)
-    return cidrs
+    return [
+        str(network)
+        for network in ipaddress.summarize_address_range(
+            ipaddress.IPv4Address(start), ipaddress.IPv4Address(end)
+        )
+    ]
 
 
 def collapse_networks(networks: List[str]) -> List[str]:
@@ -228,13 +244,9 @@ def validate_cidr(cidr: str) -> bool:
     try:
         if "/" not in cidr:
             cidr = f"{cidr}/32"
-        ip, pfx = cidr.split("/")
-        pfx = int(pfx)
-        if not (0 <= pfx <= 32):
-            return False
-        socket.inet_aton(ip)
+        ipaddress.IPv4Network(cidr, strict=False)
         return True
-    except Exception:
+    except ValueError:
         return False
 
 
@@ -270,7 +282,7 @@ def parse_old_prefixes(filepath: str) -> Dict[str, Set[int]]:
     return result
 
 
-def _parse_cached_data(cache_path: str, source: Dict) -> Optional[List[str]]:
+def _parse_cached_data(cache_path: str, source: Source) -> Optional[List[str]]:
     """Parse a cached file for a given source. Returns list of prefixes or None on error."""
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
@@ -296,7 +308,7 @@ def _parse_cached_data(cache_path: str, source: Dict) -> Optional[List[str]]:
         return None
 
 
-def download_resource(source: Dict, force_refresh: bool = False) -> Optional[List[str]]:
+def download_resource(source: Source, force_refresh: bool = False) -> Optional[List[str]]:
     url = source["url"]
 
     # Handle local files
@@ -416,8 +428,10 @@ def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
                     continue
                 try:
                     if "-" in item:
-                        p = [x.strip() for x in item.split("-")]
-                        p_start, p_end = ip_to_int(p[0]), ip_to_int(p[1])
+                        parts = [x.strip() for x in item.split("-")]
+                        if len(parts) != 2:
+                            continue
+                        p_start, p_end = ip_to_int(parts[0]), ip_to_int(parts[1])
                     else:
                         p_start, p_end = cidr_to_range(
                             item if "/" in item else f"{item}/32"
@@ -431,7 +445,7 @@ def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
                         print(f"      Assigned Community ID: {src['community_suffix']}")
                         print("-" * 40)
                         found_any = True
-                except:
+                except ValueError:
                     continue
 
     if not found_any:
@@ -439,13 +453,17 @@ def check_address_in_sources(target: str, force_refresh: bool = False) -> None:
     print("-" * 40)
 
     # BIRD Internal Table Check
-    print(f"\n--- BIRD Internal Table Check ---")
-    bird_cmd = f'birdc "show route for {target} table t_bgp_prefixes all"'
-    print(f"Running: {bird_cmd}\n")
+    print("\n--- BIRD Internal Table Check ---")
+    bird_args = ["birdc", f"show route for {target} table t_bgp_prefixes all"]
+    print(f"Running: {' '.join(bird_args)}\n")
 
-    # Run birdc and let it output directly to stdout
-    res = os.system(bird_cmd)
-    if res != 0:
+    try:
+        res = subprocess.run(bird_args, check=False)
+        birdc_failed = res.returncode != 0
+    except FileNotFoundError:
+        birdc_failed = True
+
+    if birdc_failed:
         print("\n[!] Note: birdc command failed. Possible reasons:")
         print("    - BIRD is not running")
         print("    - Table 't_bgp_prefixes' does not exist")
@@ -478,8 +496,11 @@ def smoke_test_bird(temp_bird_file: str) -> bool:
             f.write(check_conf_data)
 
         # bird -p -c returns 0 on success
-        res = os.system(f"bird -p -c {check_conf}")
-        return res == 0
+        res = subprocess.run(["bird", "-p", "-c", check_conf], check=False)
+        return res.returncode == 0
+    except FileNotFoundError as e:
+        print(f"Smoke test error: {e}")
+        return False
     except Exception as e:
         print(f"Smoke test error: {e}")
         return False
@@ -520,7 +541,7 @@ Examples:
         return
 
     start_time = time.time()
-    print(f"=== BIRD2 BGP Prefix Updater ===")
+    print("=== BIRD2 BGP Prefix Updater ===")
     print(
         f"AS: {LOCAL_AS} | Cache TTL: {CACHE_TTL // 3600}h | Stale limit: {STALE_CACHE_MAX_AGE // 86400}d"
     )
@@ -576,9 +597,13 @@ Examples:
                 continue
             if "-" in item:
                 try:
-                    p = [x.strip() for x in item.split("-")]
-                    processed.extend(range_to_cidrs(ip_to_int(p[0]), ip_to_int(p[1])))
-                except Exception:
+                    parts = [x.strip() for x in item.split("-")]
+                    if len(parts) != 2:
+                        continue
+                    processed.extend(
+                        range_to_cidrs(ip_to_int(parts[0]), ip_to_int(parts[1]))
+                    )
+                except ValueError:
                     continue
             else:
                 processed.append(item if "/" in item else f"{item}/32")
@@ -625,7 +650,7 @@ Examples:
         for c in comms:
             comm_totals[c] = comm_totals.get(c, 0) + 1
     print(f"  {'TOTAL':<23} {'':>4} {len(all_routes):>10}")
-    print(f"\nPer-community breakdown:")
+    print("\nPer-community breakdown:")
     for comm in sorted(comm_totals.keys()):
         print(f"  Community {comm:>3}: {comm_totals[comm]:>10} routes")
 
@@ -637,10 +662,10 @@ Examples:
     txt_content = "\n".join(sorted_cidrs)
     bird_lines = []
     for cidr in sorted_cidrs:
-        comms = sorted(list(all_routes[cidr]))
+        sorted_comms = sorted(all_routes[cidr])
         # Correct format: bgp_community.add((ASN, VALUE));
         # If multiple: { bgp_community.add((ASN, V1)); bgp_community.add((ASN, V2)); }
-        adds = [f"bgp_community.add(({LOCAL_AS}, {suffix}));" for suffix in comms]
+        adds = [f"bgp_community.add(({LOCAL_AS}, {suffix}));" for suffix in sorted_comms]
         bird_lines.append(f"route {cidr} blackhole {{ {' '.join(adds)} }};")
 
     bird_content = "\n".join(bird_lines)
@@ -650,9 +675,9 @@ Examples:
         print(
             "\nERROR: Invalid community format detected (found 'bgp_community.add([(')."
         )
-        invalid = [l for l in bird_lines if "bgp_community.add([(" in l]
-        for l in invalid[:5]:
-            print(f"  Invalid line: {l}")
+        invalid = [line for line in bird_lines if "bgp_community.add([(" in line]
+        for line in invalid[:5]:
+            print(f"  Invalid line: {line}")
         sys.exit(1)
 
     new_hash = hashlib.sha256(bird_content.encode()).hexdigest()
@@ -672,9 +697,6 @@ Examples:
         )
         return
 
-    # Atomic write for TXT
-    atomic_write(OUTPUT_TXT, txt_content)
-
     # Atomic write with smoke test for BIRD
     temp_bird = OUTPUT_BIRD + ".tmp"
     os.makedirs(os.path.dirname(OUTPUT_BIRD), exist_ok=True)
@@ -689,8 +711,16 @@ Examples:
             os.remove(OUTPUT_BIRD)
         os.rename(temp_bird, OUTPUT_BIRD)
 
+        # Keep prefixes.txt in sync only after the BIRD configuration is valid.
+        atomic_write(OUTPUT_TXT, txt_content)
+
         # Reload BIRD
-        if os.system("birdc configure") != 0:
+        try:
+            birdc_configure = subprocess.run(["birdc", "configure"], check=False)
+            configure_failed = birdc_configure.returncode != 0
+        except FileNotFoundError:
+            configure_failed = True
+        if configure_failed:
             print("WARNING: birdc configure failed. Is BIRD running?")
 
         elapsed = time.time() - start_time

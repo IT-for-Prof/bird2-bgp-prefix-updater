@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), and YouTube AS36040/AS43515 (`386`).
+- Added matching BIRD community constants for the new service sources.
+
+### Fixed
+- Replaced permissive IPv4 parsing with strict `ipaddress`-based validation.
+- Replaced shell-based BIRD commands with argv-based `subprocess.run` calls.
+- Write `prefixes.txt` only after the generated BIRD configuration passes smoke testing.
+
 ## [3.2.0] - 2026-05-11
 ### Changed
 - **BREAKING: BGP community renumbering by semantic group (hundreds-based scheme).** Community IDs are now grouped by meaning rather than assignment order:
@@ -137,4 +147,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `COMM_AF_SUBNETS` -> `COMM_RKN_SUBNETS` (102)
   - `COMM_CUSTOM_LISTS` -> `COMM_CUSTOM_USER` (104)
 - Обновлены примеры фильтрации в `README.md` и `README_EN.md`.
-
