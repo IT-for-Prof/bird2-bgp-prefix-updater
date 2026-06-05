@@ -42,10 +42,18 @@ def _detect_local_as() -> int:
 
 
 LOCAL_AS = _detect_local_as()
+
+# Own infrastructure that must NEVER be advertised in the feed (advertising a
+# prefix that covers your own egress next-hop creates a routing loop). The list
+# is a manually maintained, deployment-local inventory file — intentionally NOT
+# shipped in this repo so no infrastructure is disclosed. If it is missing or
+# empty the updater fails closed (see load_own_infra).
+OWN_INFRA_FILE = os.environ.get("OWN_INFRA_FILE", "/etc/bird/own-infra.lst")
+
 CACHE_DIR = os.environ.get("CACHE_DIR", "/var/lib/bird/prefix-cache")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "21600"))  # 6 hours
 STALE_CACHE_MAX_AGE = int(os.environ.get("STALE_CACHE_MAX_AGE", "604800"))  # 7 days
-USER_AGENT = "Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/3.3; +itforprof.com)"
+USER_AGENT = "Mozilla/5.0 (compatible; BIRD2-BGP-Prefix-Updater/3.4; +itforprof.com)"
 MAX_RETRIES = 3
 RETRY_DELAY = 10  # seconds
 
@@ -232,6 +240,102 @@ def collapse_networks(networks: List[str]) -> List[str]:
     for s, e in collapsed_ranges:
         result.extend(range_to_cidrs(s, e))
     return result
+
+
+def load_own_infra(path: Optional[str] = None) -> List[ipaddress.IPv4Network]:
+    """Return own-infrastructure prefixes to subtract from the feed.
+
+    Read exclusively from the manually maintained inventory file (default
+    OWN_INFRA_FILE). There are no built-in defaults, so the file is mandatory:
+    publishing a feed without an own-infra inventory would risk re-introducing
+    the loop, so a missing / empty / unreadable file is fatal (fail-closed).
+    Inline and full-line '#' comments are stripped; invalid / non-IPv4 lines
+    are skipped with a warning.
+    """
+    if path is None:
+        path = OWN_INFRA_FILE
+
+    if not os.path.exists(path):
+        print(
+            f"ERROR: own-infra file {path} not found; refusing to publish a feed "
+            f"without an own-infra inventory (fail-closed)."
+        )
+        sys.exit(1)
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            # Strip inline and full-line '#' comments; keep non-empty remainder.
+            lines = [
+                stripped
+                for line in f
+                if (stripped := line.split("#", 1)[0].strip())
+            ]
+    except Exception as e:
+        print(f"ERROR: Could not read own-infra file {path}: {e} (fail-closed).")
+        sys.exit(1)
+
+    entries: Set[ipaddress.IPv4Network] = set()
+    for item in lines:
+        cidr = item if "/" in item else f"{item}/32"
+        try:
+            entries.add(ipaddress.IPv4Network(cidr, strict=False))
+        except ValueError:
+            print(f"WARNING: Skipping invalid own-infra entry: {item}")
+
+    if not entries:
+        print(
+            f"ERROR: own-infra file {path} has no valid IPv4 prefixes; "
+            f"refusing to publish (fail-closed)."
+        )
+        sys.exit(1)
+
+    print(f"Loaded own-infra: {len(entries)} prefixes from {path}")
+    return sorted(entries)
+
+
+def exclude_own_infra(
+    all_routes: Dict[str, Set[int]], own: List[ipaddress.IPv4Network]
+) -> Dict[str, Set[int]]:
+    """Subtract own-infra networks from the route set (source-agnostic).
+
+    For each route and each own block, two CIDRs are either disjoint or one
+    contains the other:
+      - route wholly inside an own block (incl. equal) -> dropped
+      - own block strictly inside the route -> hole-punched via address_exclude
+      - disjoint -> kept unchanged
+    Community sets are carried onto every remainder prefix; remainders that
+    collapse onto the same CIDR have their communities merged.
+    """
+    if not own:
+        return all_routes
+
+    new_routes: Dict[str, Set[int]] = {}
+    for cidr, comms in all_routes.items():
+        try:
+            net = ipaddress.IPv4Network(cidr)
+        except ValueError:
+            # Should not happen (inputs are validated), keep as-is rather than lose it.
+            new_routes.setdefault(cidr, set()).update(comms)
+            continue
+
+        remaining: List[ipaddress.IPv4Network] = [net]
+        for block in own:
+            nxt: List[ipaddress.IPv4Network] = []
+            for n in remaining:
+                if n.subnet_of(block):  # n fully inside own (incl. n == block)
+                    continue
+                if block.subnet_of(n):  # own strictly inside n -> punch hole
+                    nxt.extend(n.address_exclude(block))
+                else:  # disjoint
+                    nxt.append(n)
+            remaining = nxt
+            if not remaining:
+                break
+
+        for r in remaining:
+            new_routes.setdefault(str(r), set()).update(comms)
+
+    return new_routes
 
 
 def validate_cidr(cidr: str) -> bool:
@@ -630,6 +734,38 @@ Examples:
         print(
             f"\n  Restored {restored} old routes for communities: {sorted(failed_communities)}"
         )
+
+    # Exclude own infrastructure. MUST run AFTER restoring old
+    # routes, otherwise a pre-fix prefixes.bird could reintroduce own-infra.
+    own_infra = load_own_infra()
+    before = len(all_routes)
+    # Count source routes that overlap own-infra BEFORE subtracting. Dict-size
+    # delta is misleading: hole-punching a supernet grows the feed, so it could
+    # go negative and silently hide that own-infra was excluded.
+    matched = sum(
+        1
+        for cidr in all_routes
+        if any(ipaddress.IPv4Network(cidr).overlaps(b) for b in own_infra)
+    )
+    all_routes = exclude_own_infra(all_routes, own_infra)
+    if matched:
+        print(
+            f"\n  Excluded own-infra: {matched} source route(s) overlapped "
+            f"(feed entries {before} -> {len(all_routes)})"
+        )
+
+    # Fail-closed: never ship a feed that still overlaps own-infra.
+    leaks = [
+        cidr
+        for cidr in all_routes
+        if any(ipaddress.IPv4Network(cidr).overlaps(b) for b in own_infra)
+    ]
+    if leaks:
+        print(
+            f"\nERROR: {len(leaks)} own-infra prefix(es) survived exclusion "
+            f"(refusing to write feed): {leaks[:5]}"
+        )
+        sys.exit(1)
 
     # Print summary table
     print(f"\n{'Source':<25} {'Comm':>4} {'Prefixes':>10} {'Status':<10}")
