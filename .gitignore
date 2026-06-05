@@ -1,3 +1,10 @@
+# Deployment-local real inventory of own networks — NEVER commit (only the
+# conf/own-infra.lst.example template is tracked; the real file lives in
+# /etc/bird/own-infra.lst). This guards against accidentally placing the real
+# file inside the repo working tree.
+conf/own-infra.lst
+own-infra.lst
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

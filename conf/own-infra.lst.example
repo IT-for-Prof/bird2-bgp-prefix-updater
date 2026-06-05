@@ -1,0 +1,33 @@
+# Own infrastructure — networks that must NEVER be advertised.
+#
+# This is a COMMENTED TEMPLATE. It is installed to /etc/bird/own-infra.lst,
+# where you maintain the real inventory of your own public networks: the BGP
+# next-hop (egress) and every tunnel endpoint. Advertising a prefix that covers
+# one of these creates a routing loop (the route's next-hop falls inside the
+# route itself), so the updater subtracts every network listed here from the
+# generated feed, and bird.conf rejects them again on export.
+#
+# This file ships EMPTY (examples only) so no real infrastructure is published
+# in this public repository. The updater fails closed: if /etc/bird/own-infra.lst
+# is missing or has no valid prefixes, it refuses to publish a feed.
+#
+# FORMAT:
+#   - One IPv4 address (becomes /32) or CIDR prefix per line.
+#   - '#' starts a comment, full-line OR inline:  198.51.100.0/24  # node A egress
+#   - IPv4/CIDR only. Hostnames are NOT supported and must not be used: DNS is
+#     non-deterministic and a network dependency, which would defeat this
+#     safeguard (a failed/poisoned lookup = own network not excluded = loop).
+#   - A node with many endpoint IPs: list one covering CIDR, or each /32
+#     explicitly. Do not rely on DNS to expand "many addresses".
+#   - Invalid/unparseable lines are skipped with a WARNING (check the log) and
+#     are therefore NOT protected — keep entries clean.
+#
+# Add a node's PUBLIC egress/tunnel-endpoint network here when you provision it.
+# Do NOT add downstream BGP routers (they are feed consumers, protected by their
+# own connected routes and inbound filter) unless such a router has interfaces
+# in address space that could appear in a source list.
+#
+# Examples (RFC5737 documentation ranges — replace with your own and uncomment):
+# 198.51.100.0/24
+# 203.0.113.10/32
+# 192.0.2.0/24

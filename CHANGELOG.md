@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- **Own-infrastructure exclusion (anti-loop).** The updater now subtracts your own networks from the feed before writing it, so a prefix covering your egress next-hop can never be advertised (which would create a routing loop). The list is the manually maintained `/etc/bird/own-infra.lst` (override via `OWN_INFRA_FILE`); it ships as an empty template (no infrastructure is committed to this public repo) and is mandatory — a missing or empty file is fatal (fail-closed). Subtraction is source-agnostic and hole-punches supernets via `ipaddress.address_exclude`, with a fail-closed self-check that aborts the run if any own-infra prefix survives.
+- Added `define OWN_INFRA` + `if net ~ OWN_INFRA then reject;` as the first statement of every named export filter (`export_only_ru`, `export_blocked_lists`, `export_blocked_only`, `export_services_only`, `export_complex_logic`) and the `t_client` template in `conf/bird.conf`, as a second (belt-and-suspenders) layer. Named filters must each be guarded because peers override the template's anonymous filter.
+- Added `conf/own-infra.lst` inventory template (installed to `/etc/bird/own-infra.lst`).
 - Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), and YouTube AS36040/AS43515 (`386`).
 - Added matching BIRD community constants for the new service sources.
 - Added filtered AWS CloudFront IPv4 prefixes from AWS `ip-ranges.json` as community `383`.
@@ -16,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Write `prefixes.txt` only after the generated BIRD configuration passes smoke testing, and repair it when the BIRD output is unchanged but the text output is missing or stale.
 - Treat Netflix and YouTube as all-or-fallback multi-AS sources so partial RIPEstat failures do not publish partial service communities.
 - Removed stale current-facing documentation for unsupported `RIPESTAT_URL` overrides and corrected the documented BIRD export limit.
-- Bumped `USER_AGENT` to `BIRD2-BGP-Prefix-Updater/3.3`.
+- Bumped `USER_AGENT` to `BIRD2-BGP-Prefix-Updater/3.4`.
 
 ### Removed
 - Removed inactive `blocked_sum` / `blocked_smart` source stubs and unused BIRD constants for communities `220` and `230`.
