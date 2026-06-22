@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Own-infrastructure exclusion (anti-loop).** The updater now subtracts your own networks from the feed before writing it, so a prefix covering your egress next-hop can never be advertised (which would create a routing loop). The list is the manually maintained `/etc/bird/own-infra.lst` (override via `OWN_INFRA_FILE`); it ships as an empty template (no infrastructure is committed to this public repo) and is mandatory — a missing or empty file is fatal (fail-closed). Subtraction is source-agnostic and hole-punches supernets via `ipaddress.address_exclude`, with a fail-closed self-check that aborts the run if any own-infra prefix survives.
 - Added `define OWN_INFRA` + `if net ~ OWN_INFRA then reject;` as the first statement of every named export filter (`export_only_ru`, `export_blocked_lists`, `export_blocked_only`, `export_services_only`, `export_complex_logic`) and the `t_client` template in `conf/bird.conf`, as a second (belt-and-suspenders) layer. Named filters must each be guarded because peers override the template's anonymous filter.
 - Added `conf/own-infra.lst` inventory template (installed to `/etc/bird/own-infra.lst`).
-- Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), and YouTube AS36040/AS43515 (`386`).
+- Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), YouTube AS36040/AS43515 (`386`), and Anthropic AS399358 (`387`).
 - Added matching BIRD community constants for the new service sources.
 - Added filtered AWS CloudFront IPv4 prefixes from AWS `ip-ranges.json` as community `383`.
 

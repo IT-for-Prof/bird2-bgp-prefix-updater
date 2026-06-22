@@ -179,6 +179,12 @@ SOURCES: List[Source] = [
         "aws_services": ["CLOUDFRONT"],
     },
     {
+        "name": "anthropic_as399358",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS399358",
+        "community_suffix": 387,
+        "format": "json",
+    },
+    {
         "name": "youtube_as36040_as43515",
         "urls": [
             "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS36040",
