@@ -173,6 +173,7 @@ cd bird2-bgp-prefix-updater
 | **383** | **AWS CloudFront** | IPv4-префиксы AWS `CLOUDFRONT` из `ip-ranges.json`; это фильтрованный список CloudFront, не весь AWS |
 | **386** | **YouTube** | Префиксы AS36040 и AS43515 (YouTube); оба RIPEstat источника обязательны |
 | **387** | **Anthropic** | Префиксы AS399358 (Anthropic — Claude, console/api.anthropic.com) |
+| **388** | **Threema** | Статический PI-блок `203.56.112.0/22` (netname CH-THREEMA); своего ASN у Threema нет (анонсится через AS29691/AS15576), поэтому per-ASN источник не используется |
 
 > Группы разделены так, чтобы простыми диапазонами community разводить разные категории по разным пирам. Например, `gov_networks` (110) — это российские госресурсы, и они логически в одной группе с RU Combined (100), а не в одном диапазоне с зарубежными блокировками.
 
