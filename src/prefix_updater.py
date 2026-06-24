@@ -185,6 +185,18 @@ SOURCES: List[Source] = [
         "format": "json",
     },
     {
+        # Threema has no own ASN: its PI block 203.56.112.0/22 (netname
+        # CH-THREEMA) is announced as two /23s via shared Swiss upstreams
+        # (203.56.112.0/23 AS29691 Nine, 203.56.114.0/23 AS15576 NTS), so a
+        # per-ASN RIPEstat source would pull in unrelated customers. Pin the
+        # PI /22 statically; it covers both announced halves.
+        "name": "threema",
+        "url": "static",
+        "static": ["203.56.112.0/22"],
+        "community_suffix": 388,
+        "format": "text",
+    },
+    {
         "name": "youtube_as36040_as43515",
         "urls": [
             "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS36040",
@@ -429,6 +441,13 @@ def _parse_cached_data(cache_path: str, source: Source) -> Optional[List[str]]:
 
 
 def download_resource(source: Source, force_refresh: bool = False) -> Optional[List[str]]:
+    # Static prefix list baked into the source (no fetch). Used for entities
+    # that have their own IP space but no usable own ASN (e.g. Threema's PI
+    # block routed through a shared provider AS), so the per-ASN RIPEstat
+    # pattern would grab unrelated networks.
+    if source.get("static") is not None:
+        return list(source["static"])
+
     url = source["url"]
 
     # Handle local files

@@ -177,6 +177,7 @@ Routes are tagged with communities in the format `LOCAL_AS:ID`. IDs are organize
 | **383** | **AWS CloudFront** | AWS `CLOUDFRONT` IPv4 prefixes from `ip-ranges.json`; this is a filtered CloudFront list, not all of AWS |
 | **386** | **YouTube** | AS36040 and AS43515 (YouTube) prefixes; both RIPEstat sources must succeed |
 | **387** | **Anthropic** | AS399358 prefixes (Anthropic — Claude, console/api.anthropic.com) |
+| **388** | **Threema** | Static PI block `203.56.112.0/22` (netname CH-THREEMA); Threema has no own ASN (announced via AS29691/AS15576), so a per-ASN source is not used |
 
 > Groups are split so that simple community ranges can route different categories to different peers. For example, `gov_networks` (110) is a Russian government resource, so it logically belongs in the same group as RU Combined (100), not bundled with foreign blocked services.
 

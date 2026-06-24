@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `define OWN_INFRA` + `if net ~ OWN_INFRA then reject;` as the first statement of every named export filter (`export_only_ru`, `export_blocked_lists`, `export_blocked_only`, `export_services_only`, `export_complex_logic`) and the `t_client` template in `conf/bird.conf`, as a second (belt-and-suspenders) layer. Named filters must each be guarded because peers override the template's anonymous filter.
 - Added `conf/own-infra.lst` inventory template (installed to `/etc/bird/own-infra.lst`).
 - Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), YouTube AS36040/AS43515 (`386`), and Anthropic AS399358 (`387`).
+- Added Threema as a static-prefix source: PI block `203.56.112.0/22` (community `388`). Threema has no own ASN — its PI space is announced via shared upstreams (AS29691/AS15576) — so a new `static` source type was added instead of the per-ASN RIPEstat pattern.
 - Added matching BIRD community constants for the new service sources.
 - Added filtered AWS CloudFront IPv4 prefixes from AWS `ip-ranges.json` as community `383`.
 
