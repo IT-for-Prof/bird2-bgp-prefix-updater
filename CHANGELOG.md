@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `if net ~ OWN_INFRA then reject;` as the first statement of every named export filter (`export_only_ru`, `export_blocked_lists`, `export_blocked_only`, `export_services_only`, `export_complex_logic`) and the `t_client` template in `conf/bird.conf`, as a second (belt-and-suspenders) layer. Named filters must each be guarded because peers override the template's anonymous filter. (`OWN_INFRA` itself is generated into `own-infra.conf` — see Changed.)
 - Added `conf/own-infra.lst` inventory template (installed to `/etc/bird/own-infra.lst`).
 - Added RIPEstat sources for Meta/Facebook AS32934 (`380`), Twitter/X AS13414 (`381`), Netflix AS2906/AS40027 (`382`), YouTube AS36040/AS43515 (`386`), and Anthropic AS399358 (`387`).
+- Added full Cloudflare AS13335 as a RIPEstat source (community `384`, ~2400 prefixes). The existing `official_services` (comm `300`) only carries Cloudflare's published CDN ranges (`cloudflare.com/ips-v4`, ~15 blocks); AS13335 announces many more, incl. non-published blocks like `8.6.112.0/24` that front `chatgpt.com`. Without it, DNS handing out such an IP leaks past the tunnel.
 - Added Threema as a static-prefix source: PI block `203.56.112.0/22` (community `388`). Threema has no own ASN — its PI space is announced via shared upstreams (AS29691/AS15576) — so a new `static` source type was added instead of the per-ASN RIPEstat pattern.
 - Added matching BIRD community constants for the new service sources.
 - Added filtered AWS CloudFront IPv4 prefixes from AWS `ip-ranges.json` as community `383`.
 
 ### Changed
+- Raised the BIRD client-template `export limit` from `200000` to `500000`. Adding the full Cloudflare AS13335 source (~2400 prefixes) shrank the headroom over the live feed (~103k); the limit uses `action disable`, so it must stay well above the feed to avoid dropping client sessions as the RU/blocked lists grow.
 - **`OWN_INFRA` is now generated, not hand-edited.** The updater writes `define OWN_INFRA = [...]` to `/etc/bird/own-infra.conf` from the same `own-infra.lst` inventory, and `bird.conf` pulls it in via `include`. This removes deployment-local data from the git-tracked `bird.conf` (so it can be reinstalled from git on every update without clobbering real own-infra) and makes `own-infra.lst` the single source of truth for both L1 subtraction and L2 export filters. Run the updater before `birdc configure` so the include exists.
 
 ### Fixed

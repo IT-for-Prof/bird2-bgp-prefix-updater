@@ -49,8 +49,10 @@ def test_new_ripestat_service_sources_are_present() -> None:
     assert communities_by_name["twitter_as13414"] == 381
     assert communities_by_name["netflix_as2906_as40027"] == 382
     assert communities_by_name["youtube_as36040_as43515"] == 386
+    assert communities_by_name["cloudflare_as13335"] == 384
     assert "AS32934" in sources_by_name["meta_as32934"]["url"]
     assert "AS13414" in sources_by_name["twitter_as13414"]["url"]
+    assert "AS13335" in sources_by_name["cloudflare_as13335"]["url"]
     assert sources_by_name["netflix_as2906_as40027"]["require_all_urls"] is True
     assert sources_by_name["youtube_as36040_as43515"]["require_all_urls"] is True
     assert {url.rsplit("=", 1)[1] for url in sources_by_name["netflix_as2906_as40027"]["urls"]} == {
@@ -141,6 +143,15 @@ def test_bird_config_defines_aws_cloudfront_community() -> None:
 
     assert (
         "define COMM_AWS_CLOUDFRONT = (MY_AS, 383);"
+        in bird_config.read_text(encoding="utf-8")
+    )
+
+
+def test_bird_config_defines_cloudflare_community() -> None:
+    bird_config = MODULE_PATH.parents[1] / "conf" / "bird.conf"
+
+    assert (
+        "define COMM_CLOUDFLARE     = (MY_AS, 384);"
         in bird_config.read_text(encoding="utf-8")
     )
 

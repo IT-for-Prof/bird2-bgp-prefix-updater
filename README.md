@@ -177,6 +177,7 @@ cd bird2-bgp-prefix-updater
 | **381** | **Twitter/X** | Префиксы AS13414 (Twitter/X) |
 | **382** | **Netflix** | Префиксы AS2906 и AS40027 (Netflix); оба RIPEstat источника обязательны |
 | **383** | **AWS CloudFront** | IPv4-префиксы AWS `CLOUDFRONT` из `ip-ranges.json`; это фильтрованный список CloudFront, не весь AWS |
+| **384** | **Cloudflare (полный)** | Все анонсы AS13335 (~2400 префиксов) из RIPEstat — надмножество публичных CDN-диапазонов в comm `300`; покрывает непубличные блоки вроде `8.6.112.0/24`, на которых живёт chatgpt.com |
 | **386** | **YouTube** | Префиксы AS36040 и AS43515 (YouTube); оба RIPEstat источника обязательны |
 | **387** | **Anthropic** | Префиксы AS399358 (Anthropic — Claude, console/api.anthropic.com) |
 | **388** | **Threema** | Статический PI-блок `203.56.112.0/22` (netname CH-THREEMA); своего ASN у Threema нет (анонсится через AS29691/AS15576), поэтому per-ASN источник не используется |
