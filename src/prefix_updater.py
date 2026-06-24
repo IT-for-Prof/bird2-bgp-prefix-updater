@@ -189,6 +189,18 @@ SOURCES: List[Source] = [
         "format": "json",
     },
     {
+        # Cloudflare's FULL announced space (AS13335). The official_services
+        # source only carries Cloudflare's published CDN ranges
+        # (cloudflare.com/ips-v4, ~15 blocks). AS13335 announces ~2400 prefixes
+        # incl. non-published ones like 8.6.112.0/24 that front sites such as
+        # chatgpt.com, so DNS handing out one of those would leak past the
+        # tunnel. Pull the whole ASN to cover any Cloudflare-hosted destination.
+        "name": "cloudflare_as13335",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS13335",
+        "community_suffix": 384,
+        "format": "json",
+    },
+    {
         # Threema has no own ASN: its PI block 203.56.112.0/22 (netname
         # CH-THREEMA) is announced as two /23s via shared Swiss upstreams
         # (203.56.112.0/23 AS29691 Nine, 203.56.114.0/23 AS15576 NTS), so a

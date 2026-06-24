@@ -181,6 +181,7 @@ Routes are tagged with communities in the format `LOCAL_AS:ID`. IDs are organize
 | **381** | **Twitter/X** | AS13414 (Twitter/X) prefixes |
 | **382** | **Netflix** | AS2906 and AS40027 (Netflix) prefixes; both RIPEstat sources must succeed |
 | **383** | **AWS CloudFront** | AWS `CLOUDFRONT` IPv4 prefixes from `ip-ranges.json`; this is a filtered CloudFront list, not all of AWS |
+| **384** | **Cloudflare (full)** | All AS13335 announcements (~2400 prefixes) from RIPEstat — a superset of the published CDN ranges in comm `300`; covers non-published blocks like `8.6.112.0/24` that front chatgpt.com |
 | **386** | **YouTube** | AS36040 and AS43515 (YouTube) prefixes; both RIPEstat sources must succeed |
 | **387** | **Anthropic** | AS399358 prefixes (Anthropic — Claude, console/api.anthropic.com) |
 | **388** | **Threema** | Static PI block `203.56.112.0/22` (netname CH-THREEMA); Threema has no own ASN (announced via AS29691/AS15576), so a per-ASN source is not used |
@@ -448,6 +449,6 @@ The script caches downloaded lists in `/var/lib/bird/prefix-cache` for **6 hours
 - **Passwords (MD5)**: Use MD5 authentication for BGP sessions. The password must match on both sides.
   - In BIRD config: `password "your_password";`
   - In client settings: look for "password", "tcp-md5-key", or "secret" fields.
-- Export limit `200000` is set in the BIRD client template to protect clients from route table overflow.
+- Export limit `500000` is set in the BIRD client template to protect clients from route table overflow (`action disable` drops the session if exceeded, so it is kept well above the live feed size — ~103k with the full Cloudflare source).
 
 [itforprof.com](https://itforprof.com) by Konstantin Tyutyunnik
