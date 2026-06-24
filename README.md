@@ -57,6 +57,9 @@ cd bird2-bgp-prefix-updater
    # own-infra.lst — ваш инвентарь собственных сетей. Создаётся ОДИН раз из
    # шаблона и НЕ перезаписывается при обновлениях (idempotent guard).
    # Реальный файл не хранится в git. После создания — впишите свои сети.
+   # Из него апдейтер генерирует /etc/bird/own-infra.conf (define OWN_INFRA),
+   # который подключает bird.conf — поэтому в самом bird.conf своих сетей нет
+   # и его можно безопасно переустанавливать из git при обновлениях.
    [ -f /etc/bird/own-infra.lst ] || install -m640 conf/own-infra.lst.example /etc/bird/own-infra.lst
 
    # Systemd сервис и таймер
@@ -96,7 +99,9 @@ cd bird2-bgp-prefix-updater
 
 5. **Запустите обновление:**
    ```bash
-   # Скрипт автоматически определит MY_AS из local-settings.conf
+   # Скрипт автоматически определит MY_AS из local-settings.conf.
+   # ВАЖНО: запустите апдейтер ДО старта bird — он генерирует
+   # /etc/bird/own-infra.conf, без которого include в bird.conf не разрешится.
    python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py
 
    systemctl daemon-reload
@@ -107,17 +112,18 @@ cd bird2-bgp-prefix-updater
 ### Структура файлов `/etc/bird/`
 ```
 /etc/bird/
-  bird.conf                 ← из git (общая конфигурация)
+  bird.conf                 ← из git (общая конфигурация, БЕЗ локальных данных)
   local-settings.conf       ← ваши настройки (router id, MY_AS, logging)
   peers.d/*.conf            ← ваши BGP пиры (не перезаписываются)
   prefixes.bird             ← автогенерация скриптом
+  own-infra.conf            ← автогенерация скриптом (define OWN_INFRA из own-infra.lst)
   custom.lst                ← ваши кастомные IP (изначально комментированный шаблон)
   own-infra.lst             ← ваши собственные сети (из own-infra.lst.example, НЕ в git)
 ```
 
 При `git pull` меняется только копия репозитория в `/opt/bird2-bgp-prefix-updater`.
 Файлы `/etc/bird/local-settings.conf`, `/etc/bird/own-infra.lst` и `/etc/bird/peers.d/*.conf` не хранятся в репозитории и не перезаписываются.
-Переустанавливайте `conf/bird.conf` и systemd-юниты только когда хотите применить обновлённые шаблоны из git.
+`bird.conf` больше не содержит локальных данных (`OWN_INFRA` вынесен в генерируемый `own-infra.conf`), поэтому его **безопасно переустанавливать из git** при каждом обновлении.
 
 ## Конфигурация BIRD и переменные окружения
 
@@ -199,7 +205,7 @@ cd bird2-bgp-prefix-updater
 Реализованы три слоя:
 
 1. **Вычитание в генераторе (основной слой, L1).** `src/prefix_updater.py` вычитает own-infra из набора **до** записи в bird — фид физически не содержит своих сетей при любой длине префикса. Если источник отдал супернет (например `/16`, содержащий ваш `/24`), он не выкидывается целиком, а аккуратно «прорезается» (`ipaddress.address_exclude`): анонсируется всё, **кроме** own-блока. После вычитания идёт **fail-closed** самопроверка: если хоть один own-префикс уцелел — прогон прерывается с ошибкой, старый файл не заменяется.
-2. **Экспортный фильтр bird (страховка, L2).** В `conf/bird.conf` определён `define OWN_INFRA = [ ... ];` и reject `if net ~ OWN_INFRA then reject;` стоит **первой строкой в каждом именованном фильтре** (`export_only_ru`, `export_blocked_lists`, …) и в шаблоне `t_client` — потому что пиры используют именованные фильтры, переопределяя анонимный фильтр шаблона. Суффикс `+` ловит префикс и все **более** специфичные (закрывает «/24 vs /23»). Важно: `+` **не** ловит менее специфичный супернет — это закрывает только L1.
+2. **Экспортный фильтр bird (страховка, L2).** `define OWN_INFRA = [ ... ];` **генерируется** апдейтером из `own-infra.lst` в `/etc/bird/own-infra.conf` (единый источник правды — L1 и L2 не разъезжаются, и в git-трекаемом `bird.conf` нет ваших сетей), а `bird.conf` подключает его через `include`. Reject `if net ~ OWN_INFRA then reject;` стоит **первой строкой в каждом именованном фильтре** (`export_only_ru`, `export_blocked_lists`, …) и в шаблоне `t_client` — потому что пиры используют именованные фильтры, переопределяя анонимный фильтр шаблона. Суффикс `+` ловит префикс и все **более** специфичные (закрывает «/24 vs /23»). Важно: `+` **не** ловит менее специфичный супернет — это закрывает только L1.
 3. **Входной фильтр на downstream-роутере (L3).** Приёмная сторона (pfSense/FRR) фильтрует own-infra на входе как последнюю страховку.
 
 ### Источник правды — `own-infra.lst`
@@ -374,9 +380,11 @@ git pull
 # Если менялся systemd-юнит или bird.conf — переустановите их:
 install -m644 systemd/bird2-bgp-prefix-updater.service /etc/systemd/system/
 install -m644 systemd/bird2-bgp-prefix-updater.timer /etc/systemd/system/
-# Внимание: bird.conf перезапишет ваши изменения, если вы редактировали его локально
-install -m644 conf/bird.conf /etc/bird/bird.conf
+# bird.conf не содержит локальных данных (OWN_INFRA генерируется в own-infra.conf),
+# поэтому переустановка безопасна и ничего вашего не затрёт:
+install -b -m644 conf/bird.conf /etc/bird/bird.conf
 systemctl daemon-reload
+# Перезапуск апдейтера перегенерирует own-infra.conf и prefixes.bird ДО reconfigure:
 systemctl restart bird2-bgp-prefix-updater.service
 birdc configure
 ```
