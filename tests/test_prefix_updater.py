@@ -608,3 +608,100 @@ def test_dedup_is_idempotent() -> None:
     prefix_updater.dedup_covered_more_specifics(routes)
     second = prefix_updater.dedup_covered_more_specifics(routes)
     assert second == 0
+
+
+def test_dedup_classes_collapse_within_a_range() -> None:
+    # 200 (RKN) under 300 (services): different communities, same class -> drop.
+    routes = {
+        "10.0.0.0/24": {300},
+        "10.0.0.5/32": {200},
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(
+        routes, classes=[(200, 399)]
+    )
+    assert dropped == 1
+    assert "10.0.0.5/32" not in routes
+
+
+def test_dedup_classes_keep_across_class_boundary() -> None:
+    # 200 (BLOCKED class) under 100 (RU class): different classes -> keep.
+    routes = {
+        "10.0.0.0/24": {100},
+        "10.0.0.5/32": {200},
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(
+        routes, classes=[(100, 199), (200, 399)]
+    )
+    assert dropped == 0
+    assert "10.0.0.5/32" in routes
+
+
+def test_dedup_empty_classes_matches_exact_superset() -> None:
+    # No classes -> only exact community superset drops (universal-safe).
+    routes = {"10.0.0.0/24": {300}, "10.0.0.5/32": {200}}
+    assert prefix_updater.dedup_covered_more_specifics(routes) == 0
+    assert "10.0.0.5/32" in routes
+
+
+def test_parse_class_ranges_valid() -> None:
+    assert prefix_updater.parse_class_ranges("100-199, 200-399") == [
+        (100, 199),
+        (200, 399),
+    ]
+
+
+def test_parse_class_ranges_rejects_overlap() -> None:
+    with pytest.raises(SystemExit):
+        prefix_updater.parse_class_ranges("100-250,200-399")
+
+
+def test_parse_class_ranges_rejects_malformed() -> None:
+    with pytest.raises(SystemExit):
+        prefix_updater.parse_class_ranges("100")
+    with pytest.raises(SystemExit):
+        prefix_updater.parse_class_ranges("abc-def")
+    with pytest.raises(SystemExit):
+        prefix_updater.parse_class_ranges("300-200")
+
+
+def _write_peer(tmp_path: Any, name: str, body: str) -> None:
+    (tmp_path / f"{name}.conf").write_text(body, encoding="utf-8")
+
+
+def test_validate_classes_accepts_compatible_filters(tmp_path: Any) -> None:
+    _write_peer(tmp_path, "ru", "protocol bgp X { export filter export_only_ru; }")
+    _write_peer(
+        tmp_path, "lan", "protocol bgp Y { export filter export_blocked_lists; }"
+    )
+    # contains/disjoint for both classes -> no SystemExit
+    prefix_updater.validate_classes_against_peers(
+        [(100, 199), (200, 399)], str(tmp_path)
+    )
+
+
+def test_validate_classes_rejects_partial_overlap_filter(tmp_path: Any) -> None:
+    # export_blocked_only (200-299) splits class 200-399 -> fail-closed.
+    _write_peer(
+        tmp_path, "bo", "protocol bgp Z { export filter export_blocked_only; }"
+    )
+    with pytest.raises(SystemExit):
+        prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
+
+
+def test_validate_classes_rejects_unknown_filter(tmp_path: Any) -> None:
+    _write_peer(tmp_path, "c", "protocol bgp Z { export filter my_custom_filter; }")
+    with pytest.raises(SystemExit):
+        prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
+
+
+def test_validate_classes_ignores_inline_filter(tmp_path: Any) -> None:
+    # Inline filter (template default) exports everything; not name-matched.
+    _write_peer(tmp_path, "tpl", "protocol bgp Z { export filter { reject; }; }")
+    prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
+
+
+def test_validate_classes_fails_when_peers_dir_missing(tmp_path: Any) -> None:
+    with pytest.raises(SystemExit):
+        prefix_updater.validate_classes_against_peers(
+            [(200, 399)], str(tmp_path / "nope")
+        )

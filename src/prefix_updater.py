@@ -10,9 +10,10 @@ import hashlib
 import time
 import argparse
 import re
+import glob
 import ipaddress
 import subprocess
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 # Configuration
 OUTPUT_TXT = os.environ.get("OUTPUT_TXT", "/var/lib/bird/prefixes.txt")
@@ -53,6 +54,21 @@ OWN_INFRA_FILE = os.environ.get("OWN_INFRA_FILE", "/etc/bird/own-infra.lst")
 # OWN_INFRA_FILE so the L2 export-filter list has a single source of truth and
 # the git-tracked bird.conf carries no deployment-local data.
 OWN_INFRA_CONF = os.environ.get("OWN_INFRA_CONF", "/etc/bird/own-infra.conf")
+
+# Per-peer BGP configs, scanned to validate --aggregate-classes against the
+# export filters actually in use (fail-closed if a filter could need a route
+# that dedup would drop). See validate_classes_against_peers().
+PEERS_DIR = os.environ.get("PEERS_DIR", "/etc/bird/peers.d")
+
+# Built-in export filters from bird.conf and the inclusive community-suffix
+# range each one accepts. Used only to verify --aggregate-classes is safe; an
+# unknown filter name fails closed because we cannot prove its range.
+FILTER_RANGES: Dict[str, Tuple[int, int]] = {
+    "export_only_ru": (100, 199),
+    "export_blocked_lists": (200, 399),
+    "export_blocked_only": (200, 299),
+    "export_services_only": (300, 399),
+}
 
 CACHE_DIR = os.environ.get("CACHE_DIR", "/var/lib/bird/prefix-cache")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "21600"))  # 6 hours
@@ -276,45 +292,160 @@ def collapse_networks(networks: List[str]) -> List[str]:
     return result
 
 
-def dedup_covered_more_specifics(all_routes: Dict[str, Set[int]]) -> int:
-    """Drop a prefix when a less-specific prefix in the same feed already
-    covers it AND carries a superset of its communities.
+def _community_class(c: int, classes: Sequence[Tuple[int, int]]) -> object:
+    """Map a community suffix to its aggregation class id: the (lo, hi) range
+    that contains it, or a unique singleton if no class does. Communities in
+    the same class are interchangeable for the dedup decision."""
+    for lo, hi in classes:
+        if lo <= c <= hi:
+            return (lo, hi)
+    return ("singleton", c)
 
-    BIRD export filters select on community ranges, so if a covering supernet
-    S has every community that more-specific P has, any *monotone* (accept-by-
-    range) filter accepting P also accepts S. The drop is therefore safe for
-    every monotone peer filter, not just one. A supernet with a different /
-    narrower community set never triggers a drop. NOTE: this is unsound for
-    non-monotone (reject/order-dependent) filters such as the export_complex_logic
-    example — do not attach those to a peer when dedup is enabled.
+
+def dedup_covered_more_specifics(
+    all_routes: Dict[str, Set[int]],
+    classes: Sequence[Tuple[int, int]] = (),
+) -> int:
+    """Drop a prefix when a less-specific prefix in the same feed covers it AND
+    carries a superset of its community *classes*.
+
+    `collapse_networks` only dedups within a single source/community, so a /32
+    from one list nested in a /24 from another survives. This removes those.
+
+    With the default empty `classes`, a route is dropped only when the covering
+    supernet has an exact superset of its communities — universally safe for any
+    export filter. Passing `classes` (community-suffix ranges that every export
+    filter accepts or rejects as a whole, e.g. [(100,199),(200,399)]) treats
+    communities within a range as equivalent, which is what unlocks real feed
+    reduction — but is sound ONLY if no peer filter splits a class. Callers that
+    pass `classes` MUST first call validate_classes_against_peers() (fail-closed).
 
     Mutates `all_routes` in place; returns the number of routes removed.
     """
+    def class_set(comms: Set[int]) -> frozenset:
+        return frozenset(_community_class(c, classes) for c in comms)
+
     # Index networks by prefix length for O(prefixlen) supernet lookup.
-    by_len: Dict[int, Dict[int, Set[int]]] = {}
+    by_len: Dict[int, Dict[int, frozenset]] = {}
     parsed: Dict[str, ipaddress.IPv4Network] = {}
+    own_class: Dict[str, frozenset] = {}
     for cidr, comms in all_routes.items():
         net = ipaddress.IPv4Network(cidr)
         parsed[cidr] = net
-        by_len.setdefault(net.prefixlen, {})[int(net.network_address)] = comms
+        cs = class_set(comms)
+        own_class[cidr] = cs
+        by_len.setdefault(net.prefixlen, {})[int(net.network_address)] = cs
     plens = sorted(by_len)
 
     drop: List[str] = []
     for cidr, net in parsed.items():
         ip = int(net.network_address)
-        comms = all_routes[cidr]
+        p_cls = own_class[cidr]
         for pl in plens:
             if pl >= net.prefixlen:
                 break  # only strictly less-specific prefixes can cover P
             mask = (0xFFFFFFFF << (32 - pl)) & 0xFFFFFFFF
-            super_comms = by_len[pl].get(ip & mask)
-            if super_comms is not None and comms <= super_comms:
+            s_cls = by_len[pl].get(ip & mask)
+            if s_cls is not None and p_cls <= s_cls:
                 drop.append(cidr)
                 break
 
     for cidr in drop:
         del all_routes[cidr]
     return len(drop)
+
+
+def parse_class_ranges(spec: str) -> List[Tuple[int, int]]:
+    """Parse '100-199,200-399' into [(100,199),(200,399)]. Fails closed on
+    malformed input, lo>hi, or overlapping ranges (overlap is ambiguous)."""
+    ranges: List[Tuple[int, int]] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        lo_s, sep, hi_s = part.partition("-")
+        if not sep or not lo_s.strip() or not hi_s.strip():
+            print(f"ERROR: invalid class range '{part}' (expected LO-HI).")
+            sys.exit(1)
+        try:
+            lo, hi = int(lo_s), int(hi_s)
+        except ValueError:
+            print(f"ERROR: non-integer class range '{part}'.")
+            sys.exit(1)
+        if lo > hi:
+            print(f"ERROR: class range '{part}' has LO > HI.")
+            sys.exit(1)
+        ranges.append((lo, hi))
+    for i, (lo1, hi1) in enumerate(ranges):
+        for lo2, hi2 in ranges[i + 1:]:
+            if lo1 <= hi2 and lo2 <= hi1:
+                print(f"ERROR: class ranges overlap: {(lo1, hi1)} and {(lo2, hi2)}.")
+                sys.exit(1)
+    return ranges
+
+
+def validate_classes_against_peers(
+    classes: Sequence[Tuple[int, int]], peers_dir: Optional[str] = None
+) -> None:
+    """Fail closed unless every export filter used by a peer is compatible with
+    the aggregation classes.
+
+    A filter is compatible iff, for each class, its accept-range either fully
+    contains the class or is disjoint from it. A filter whose range only
+    partially overlaps a class (e.g. export_blocked_only 200-299 vs class
+    200-399) would still advertise a more-specific that dedup could drop while
+    its covering supernet is filtered out — silent route loss. Unknown filter
+    names are rejected because their range can't be proven. Inline export
+    filters (the t_client default, `export filter { ... }`) export everything
+    and are matched by no name, so they're correctly ignored.
+    """
+    if peers_dir is None:
+        peers_dir = PEERS_DIR
+    if not os.path.isdir(peers_dir):
+        print(
+            f"ERROR: --aggregate-classes set but peers dir {peers_dir} not found "
+            f"(cannot verify filter safety; fail-closed)."
+        )
+        sys.exit(1)
+
+    used: Set[str] = set()
+    for fn in sorted(glob.glob(os.path.join(peers_dir, "*.conf"))):
+        try:
+            with open(fn, "r", encoding="utf-8") as f:
+                text = f.read()
+        except Exception as e:
+            print(f"ERROR: cannot read peer config {fn}: {e} (fail-closed).")
+            sys.exit(1)
+        for m in re.finditer(r"export\s+filter\s+([A-Za-z_][A-Za-z0-9_]*)", text):
+            used.add(m.group(1))
+
+    problems: List[str] = []
+    for name in sorted(used):
+        rng = FILTER_RANGES.get(name)
+        if rng is None:
+            problems.append(f"unknown filter '{name}' (range not in FILTER_RANGES)")
+            continue
+        lo, hi = rng
+        for clo, chi in classes:
+            overlaps = max(lo, clo) <= min(hi, chi)
+            contains = lo <= clo and chi <= hi
+            if overlaps and not contains:
+                problems.append(
+                    f"filter '{name}' range {lo}-{hi} partially overlaps "
+                    f"class {clo}-{chi}"
+                )
+
+    if problems:
+        print("ERROR: --aggregate-classes incompatible with deployed filters "
+              "(fail-closed):")
+        for p in problems:
+            print(f"  - {p}")
+        sys.exit(1)
+
+    print(
+        f"  Aggregation classes validated against peer filters: "
+        f"{sorted(used) or '(none named; all inline/default)'}"
+    )
 
 
 def load_own_infra(path: Optional[str] = None) -> List[ipaddress.IPv4Network]:
@@ -743,6 +874,23 @@ Examples:
         action="store_true",
         help="Ignore local cache and download everything from the Internet",
     )
+    parser.add_argument(
+        "--aggregate-classes",
+        type=str,
+        default=None,
+        metavar="LO-HI,LO-HI",
+        help="Enable cross-source dedup of more-specifics within these "
+        "community-suffix ranges (e.g. '100-199,200-399'). OFF by default. "
+        "Only enable if every peer's export filter accepts each range as a "
+        "whole; validated against --peers-dir, fail-closed on mismatch.",
+    )
+    parser.add_argument(
+        "--peers-dir",
+        type=str,
+        default=PEERS_DIR,
+        help=f"Peer config dir scanned to validate --aggregate-classes "
+        f"(default {PEERS_DIR}).",
+    )
     args = parser.parse_args()
 
     if args.check:
@@ -874,6 +1022,23 @@ Examples:
             f"(refusing to write feed): {leaks[:5]}"
         )
         sys.exit(1)
+
+    # Optional: drop more-specifics covered by a supernet in the same feed
+    # (cross-source redundancy; collapse_networks only dedups within a source).
+    # OFF unless --aggregate-classes is given, because the universal-safe rule
+    # drops ~nothing on real feeds — the redundancy is cross-community, so it
+    # only collapses once communities are grouped into the ranges that peer
+    # filters accept as a whole. Validated against the live filters first.
+    if args.aggregate_classes:
+        classes = parse_class_ranges(args.aggregate_classes)
+        validate_classes_against_peers(classes, args.peers_dir)
+        before_dedup = len(all_routes)
+        dropped = dedup_covered_more_specifics(all_routes, classes)
+        print(
+            f"\n  Deduplicated covered more-specifics within "
+            f"{['-'.join(map(str, c)) for c in classes]}: "
+            f"{before_dedup} -> {len(all_routes)} (-{dropped})"
+        )
 
     # Print summary table
     print(f"\n{'Source':<25} {'Comm':>4} {'Prefixes':>10} {'Status':<10}")
