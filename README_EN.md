@@ -14,6 +14,7 @@ Automates downloading, validating, and serving BGP prefixes from RIPEstat and va
 - **Auto-Collapse**: Automatically merges adjacent subnets to optimize route table size
 - **Atomic Updates**: Safe file writes with smoke testing before reloading BIRD
 - **Anti-loop (own-infra)**: Your own networks are subtracted from the feed before write (with supernet hole-punching) and rejected in the BIRD export filters; the script is fail-closed without an inventory
+- **Cross-source deduplication**: more-specifics covered by a supernet of the same community class are dropped (≈−30 % of the feed) with unchanged coverage; on by default, with a fail-closed check of peer filters (see [Feed deduplication](#feed-deduplication---aggregate-classes))
 - **Strict IPv4 parsing**: Rejects malformed IPv4/CIDR inputs instead of accepting legacy shorthand forms
 - **All-or-fallback service groups**: Multi-AS service groups such as Netflix and YouTube fall back to previous routes if any required AS source fails
 
@@ -270,6 +271,31 @@ filter export_services_only {
 }
 ```
 
+## Feed deduplication (`--aggregate-classes`)
+
+`collapse` merges adjacent/nested prefixes **only within a single source**. So a `/32` from one list (e.g. a blocked host, community `200`) stays in the feed even when it sits entirely inside a `/24` from another source (e.g. a CDN block `384` or RKN subnet `210`). On a real feed about **30 %** of routes are such covered more-specifics (~33k of 111k).
+
+Deduplication drops a more-specific `P` when a less-specific supernet `S` from the **same community class** covers it — a range that every export filter accepts as a whole. Classes are set by a flag and default to the built-in filter ranges:
+
+```bash
+# Enabled by default — equivalent to:
+python3 src/prefix_updater.py --aggregate-classes 100-199,200-399
+# Disable entirely (ship every more-specific):
+python3 src/prefix_updater.py --no-aggregate
+```
+
+Why it's safe: filters select communities by **range**, so if `S` carries every class that `P` does, any filter accepting `P` also accepts `S`. Longest-match on the client yields the same next-hop — coverage is unchanged, just fewer routes (vps02: 111,048 → 77,337, −30 %).
+
+**Fail-closed guard.** Before applying, the script scans `--peers-dir` (default `/etc/bird/peers.d`) and checks each peer's export filter against the `FILTER_RANGES` registry:
+
+- a filter whose accept-range **partially overlaps** a class (e.g. `export_blocked_only` 200–299 vs class 200–399) would split it and lose a route — rejected;
+- an unknown named filter, and an inline filter that references `bgp_community`, are rejected too (range can't be proven);
+- a community-free "export everything" inline filter (the `t_client` default) is safe and ignored.
+
+With an **explicit** `--aggregate-classes`, an incompatibility is fatal (the run aborts). On the **default** path it degrades gracefully: it warns and ships the full, un-deduplicated feed so an unrelated peer change can't stall updates.
+
+> ⚠️ If you add a peer with a filter that selects a sub-range inside a class (`export_blocked_only`, `export_services_only`, or a custom `bgp_community` filter), either narrow the classes (`--aggregate-classes 100-199,200-299,300-399`) or disable dedup (`--no-aggregate`) — otherwise the sub-range peer would miss routes covered by a supernet from a neighbouring sub-range.
+
 ### pfSense (FRR)
 Config file `/var/etc/frr/frr.conf`:
 ```
@@ -412,6 +438,7 @@ The script caches downloaded lists in `/var/lib/bird/prefix-cache` for **6 hours
   ```bash
   python3 /opt/bird2-bgp-prefix-updater/src/prefix_updater.py --force-refresh
   ```
+- Feed deduplication is on by default; disable with `--no-aggregate`, retune with `--aggregate-classes` (see [Feed deduplication](#feed-deduplication---aggregate-classes)).
 
 ### General commands
 - **BGP Status**: `birdc show protocols`
