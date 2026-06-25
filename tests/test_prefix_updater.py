@@ -736,6 +736,29 @@ def test_validate_classes_fails_when_peers_dir_missing(tmp_path: Any) -> None:
         )
 
 
+def test_validate_classes_nonstrict_degrades_instead_of_exiting(tmp_path: Any) -> None:
+    # Default-on path (strict=False): an incompatible peer returns False, no exit.
+    _write_peer(
+        tmp_path, "bo", "protocol bgp Z { export filter export_blocked_only; }"
+    )
+    assert (
+        prefix_updater.validate_classes_against_peers(
+            [(200, 399)], str(tmp_path), strict=False
+        )
+        is False
+    )
+
+
+def test_validate_classes_nonstrict_ok_returns_true(tmp_path: Any) -> None:
+    _write_peer(tmp_path, "lan", "protocol bgp Y { export filter export_blocked_lists; }")
+    assert (
+        prefix_updater.validate_classes_against_peers(
+            [(100, 199), (200, 399)], str(tmp_path), strict=False
+        )
+        is True
+    )
+
+
 def test_dedup_classes_idempotent() -> None:
     routes = {
         "10.0.0.0/24": {300},

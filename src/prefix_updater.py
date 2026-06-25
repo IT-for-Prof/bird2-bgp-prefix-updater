@@ -70,6 +70,11 @@ FILTER_RANGES: Dict[str, Tuple[int, int]] = {
     "export_services_only": (300, 399),
 }
 
+# Feed dedup runs by default with these community-suffix classes (one per
+# coarse export-filter accept-range: RU 100-199, blocked+services 200-399).
+# Override with --aggregate-classes, disable with --no-aggregate.
+DEFAULT_AGGREGATE_CLASSES = "100-199,200-399"
+
 CACHE_DIR = os.environ.get("CACHE_DIR", "/var/lib/bird/prefix-cache")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "21600"))  # 6 hours
 STALE_CACHE_MAX_AGE = int(os.environ.get("STALE_CACHE_MAX_AGE", "604800"))  # 7 days
@@ -419,10 +424,12 @@ def _inline_export_filter_uses_community(text: str) -> bool:
 
 
 def validate_classes_against_peers(
-    classes: Sequence[Tuple[int, int]], peers_dir: Optional[str] = None
-) -> None:
-    """Fail closed unless every export filter used by a peer is compatible with
-    the aggregation classes.
+    classes: Sequence[Tuple[int, int]],
+    peers_dir: Optional[str] = None,
+    strict: bool = True,
+) -> bool:
+    """Check every export filter used by a peer is compatible with the
+    aggregation classes. Returns True if dedup is safe to apply.
 
     A named filter is compatible iff, for each class, its accept-range either
     fully contains the class or is disjoint from it. A filter whose range only
@@ -433,15 +440,24 @@ def validate_classes_against_peers(
     `export filter { ... }` that references bgp_community is also rejected (same
     splitting risk, no name to check); a community-free inline filter (the
     t_client default that exports everything) is safe and ignored.
+
+    With strict=True (explicit --aggregate-classes) an incompatibility aborts
+    the run. With strict=False (the default-on path) it degrades gracefully:
+    warn and return False so the caller ships the full, un-deduped feed instead
+    of stalling feed updates over an unrelated peer change.
     """
     if peers_dir is None:
         peers_dir = PEERS_DIR
     if not os.path.isdir(peers_dir):
-        print(
-            f"ERROR: --aggregate-classes set but peers dir {peers_dir} not found "
-            f"(cannot verify filter safety; fail-closed)."
+        msg = (
+            f"feed dedup: peers dir {peers_dir} not found "
+            f"(cannot verify filter safety)"
         )
-        sys.exit(1)
+        if strict:
+            print(f"ERROR: --aggregate-classes set but {msg}; fail-closed.")
+            sys.exit(1)
+        print(f"WARNING: feed dedup disabled this run — {msg}.")
+        return False
 
     problems: List[str] = []
     used: Set[str] = set()
@@ -450,8 +466,8 @@ def validate_classes_against_peers(
             with open(fn, "r", encoding="utf-8") as f:
                 text = _strip_bird_comments(f.read())
         except Exception as e:
-            print(f"ERROR: cannot read peer config {fn}: {e} (fail-closed).")
-            sys.exit(1)
+            problems.append(f"cannot read peer config {fn}: {e}")
+            continue
         for m in re.finditer(r"export\s+filter\s+([A-Za-z_][A-Za-z0-9_]*)", text):
             used.add(m.group(1))
         if _inline_export_filter_uses_community(text):
@@ -476,16 +492,23 @@ def validate_classes_against_peers(
                 )
 
     if problems:
-        print("ERROR: --aggregate-classes incompatible with deployed filters "
-              "(fail-closed):")
+        if strict:
+            print("ERROR: --aggregate-classes incompatible with deployed filters "
+                  "(fail-closed):")
+            for p in problems:
+                print(f"  - {p}")
+            sys.exit(1)
+        print("WARNING: feed dedup disabled this run — deployed filters "
+              "incompatible with aggregation classes:")
         for p in problems:
             print(f"  - {p}")
-        sys.exit(1)
+        return False
 
     print(
         f"  Aggregation classes validated against peer filters: "
         f"{sorted(used) or '(none named; all inline/default)'}"
     )
+    return True
 
 
 def load_own_infra(path: Optional[str] = None) -> List[ipaddress.IPv4Network]:
@@ -919,16 +942,21 @@ Examples:
         type=str,
         default=None,
         metavar="LO-HI,LO-HI",
-        help="Enable cross-source dedup of more-specifics within these "
-        "community-suffix ranges (e.g. '100-199,200-399'). OFF by default. "
-        "Only enable if every peer's export filter accepts each range as a "
-        "whole; validated against --peers-dir, fail-closed on mismatch.",
+        help=f"Override the community-suffix ranges used for cross-source dedup "
+        f"of more-specifics (default {DEFAULT_AGGREGATE_CLASSES}). An explicit "
+        f"value is validated against --peers-dir and fails closed on a filter "
+        f"mismatch; the default degrades to the full feed instead.",
+    )
+    parser.add_argument(
+        "--no-aggregate",
+        action="store_true",
+        help="Disable feed dedup entirely (ship every more-specific).",
     )
     parser.add_argument(
         "--peers-dir",
         type=str,
         default=PEERS_DIR,
-        help=f"Peer config dir scanned to validate --aggregate-classes "
+        help=f"Peer config dir scanned to validate aggregation classes "
         f"(default {PEERS_DIR}).",
     )
     args = parser.parse_args()
@@ -1063,22 +1091,26 @@ Examples:
         )
         sys.exit(1)
 
-    # Optional: drop more-specifics covered by a supernet in the same feed
-    # (cross-source redundancy; collapse_networks only dedups within a source).
-    # OFF unless --aggregate-classes is given, because the universal-safe rule
-    # drops ~nothing on real feeds — the redundancy is cross-community, so it
-    # only collapses once communities are grouped into the ranges that peer
-    # filters accept as a whole. Validated against the live filters first.
-    if args.aggregate_classes:
-        classes = parse_class_ranges(args.aggregate_classes)
-        validate_classes_against_peers(classes, args.peers_dir)
-        before_dedup = len(all_routes)
-        dropped = dedup_covered_more_specifics(all_routes, classes)
-        print(
-            f"\n  Deduplicated covered more-specifics within "
-            f"{['-'.join(map(str, c)) for c in classes]}: "
-            f"{before_dedup} -> {len(all_routes)} (-{dropped})"
-        )
+    # Drop more-specifics covered by a supernet in the same feed (cross-source
+    # redundancy; collapse_networks only dedups within a source). ON by default
+    # with DEFAULT_AGGREGATE_CLASSES — the universal-safe rule drops ~nothing on
+    # real feeds because the redundancy is cross-community, so it only collapses
+    # once communities are grouped into the ranges peer filters accept as a
+    # whole. --aggregate-classes overrides the ranges (strict), --no-aggregate
+    # turns it off. The default path validates the live filters and degrades to
+    # the full feed (never aborts) if a peer is incompatible.
+    if not args.no_aggregate:
+        explicit = args.aggregate_classes is not None
+        spec = args.aggregate_classes if explicit else DEFAULT_AGGREGATE_CLASSES
+        classes = parse_class_ranges(spec)
+        if validate_classes_against_peers(classes, args.peers_dir, strict=explicit):
+            before_dedup = len(all_routes)
+            dropped = dedup_covered_more_specifics(all_routes, classes)
+            print(
+                f"\n  Deduplicated covered more-specifics within "
+                f"{['-'.join(map(str, c)) for c in classes]}: "
+                f"{before_dedup} -> {len(all_routes)} (-{dropped})"
+            )
 
     # Print summary table
     print(f"\n{'Source':<25} {'Comm':>4} {'Prefixes':>10} {'Status':<10}")
