@@ -546,3 +546,65 @@ def test_main_excludes_own_infra_restored_from_old_feed(
     out = bird_output.read_text(encoding="utf-8")
     assert "10.20.42" not in out
     assert "198.51.100.0/24" in out
+
+
+def test_dedup_drops_more_specific_when_supernet_community_superset() -> None:
+    routes = {
+        "10.0.0.0/24": {200},
+        "10.0.0.5/32": {200},          # covered, same community -> drop
+        "10.0.0.7/32": {200, 384},     # covered but {200,384} ⊄ {200} -> keep
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(routes)
+    assert dropped == 1
+    assert "10.0.0.5/32" not in routes
+    assert "10.0.0.0/24" in routes
+    assert "10.0.0.7/32" in routes
+
+
+def test_dedup_keeps_more_specific_when_supernet_has_different_community() -> None:
+    routes = {
+        "10.0.0.0/24": {384},          # CDN block
+        "10.0.0.5/32": {200},          # RKN host inside it; {200} ⊄ {384} -> keep
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(routes)
+    assert dropped == 0
+    assert "10.0.0.5/32" in routes
+
+
+def test_dedup_drops_when_supernet_is_strict_superset() -> None:
+    routes = {
+        "10.0.0.0/24": {200, 384},
+        "10.0.0.5/32": {200},          # {200} ⊆ {200,384} -> drop
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(routes)
+    assert dropped == 1
+    assert "10.0.0.5/32" not in routes
+
+
+def test_dedup_ignores_disjoint_and_equal_prefixes() -> None:
+    routes = {
+        "10.0.0.0/24": {200},
+        "10.1.0.0/24": {200},          # disjoint, equal length -> keep
+        "10.2.0.0/24": {200, 384},     # disjoint, different comms -> keep
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(routes)
+    assert dropped == 0
+    assert len(routes) == 3
+
+
+def test_dedup_handles_multi_level_nesting() -> None:
+    routes = {
+        "10.0.0.0/16": {200},
+        "10.0.0.0/24": {200},          # covered by /16 -> drop
+        "10.0.0.5/32": {200},          # covered by /16 (and /24) -> drop
+    }
+    dropped = prefix_updater.dedup_covered_more_specifics(routes)
+    assert dropped == 2
+    assert set(routes) == {"10.0.0.0/16"}
+
+
+def test_dedup_is_idempotent() -> None:
+    routes = {"10.0.0.0/24": {200}, "10.0.0.5/32": {200}}
+    prefix_updater.dedup_covered_more_specifics(routes)
+    second = prefix_updater.dedup_covered_more_specifics(routes)
+    assert second == 0

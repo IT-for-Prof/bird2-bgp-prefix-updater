@@ -276,6 +276,47 @@ def collapse_networks(networks: List[str]) -> List[str]:
     return result
 
 
+def dedup_covered_more_specifics(all_routes: Dict[str, Set[int]]) -> int:
+    """Drop a prefix when a less-specific prefix in the same feed already
+    covers it AND carries a superset of its communities.
+
+    BIRD export filters select on community ranges, so if a covering supernet
+    S has every community that more-specific P has, any *monotone* (accept-by-
+    range) filter accepting P also accepts S. The drop is therefore safe for
+    every monotone peer filter, not just one. A supernet with a different /
+    narrower community set never triggers a drop. NOTE: this is unsound for
+    non-monotone (reject/order-dependent) filters such as the export_complex_logic
+    example — do not attach those to a peer when dedup is enabled.
+
+    Mutates `all_routes` in place; returns the number of routes removed.
+    """
+    # Index networks by prefix length for O(prefixlen) supernet lookup.
+    by_len: Dict[int, Dict[int, Set[int]]] = {}
+    parsed: Dict[str, ipaddress.IPv4Network] = {}
+    for cidr, comms in all_routes.items():
+        net = ipaddress.IPv4Network(cidr)
+        parsed[cidr] = net
+        by_len.setdefault(net.prefixlen, {})[int(net.network_address)] = comms
+    plens = sorted(by_len)
+
+    drop: List[str] = []
+    for cidr, net in parsed.items():
+        ip = int(net.network_address)
+        comms = all_routes[cidr]
+        for pl in plens:
+            if pl >= net.prefixlen:
+                break  # only strictly less-specific prefixes can cover P
+            mask = (0xFFFFFFFF << (32 - pl)) & 0xFFFFFFFF
+            super_comms = by_len[pl].get(ip & mask)
+            if super_comms is not None and comms <= super_comms:
+                drop.append(cidr)
+                break
+
+    for cidr in drop:
+        del all_routes[cidr]
+    return len(drop)
+
+
 def load_own_infra(path: Optional[str] = None) -> List[ipaddress.IPv4Network]:
     """Return own-infrastructure prefixes to subtract from the feed.
 
