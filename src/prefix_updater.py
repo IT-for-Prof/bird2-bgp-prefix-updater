@@ -376,6 +376,9 @@ def parse_class_ranges(spec: str) -> List[Tuple[int, int]]:
             print(f"ERROR: class range '{part}' has LO > HI.")
             sys.exit(1)
         ranges.append((lo, hi))
+    if not ranges:
+        print(f"ERROR: --aggregate-classes '{spec}' has no valid ranges.")
+        sys.exit(1)
     for i, (lo1, hi1) in enumerate(ranges):
         for lo2, hi2 in ranges[i + 1:]:
             if lo1 <= hi2 and lo2 <= hi1:
@@ -384,20 +387,52 @@ def parse_class_ranges(spec: str) -> List[Tuple[int, int]]:
     return ranges
 
 
+def _strip_bird_comments(text: str) -> str:
+    """Remove BIRD `/* */` block and `#` line comments so a commented-out filter
+    reference isn't mistaken for a live one."""
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
+def _inline_export_filter_uses_community(text: str) -> bool:
+    """True if an inline `export filter { ... }` block references bgp_community.
+
+    Such a block can split an aggregation class just like a narrow named filter,
+    but carries no name to look up — so we cannot prove its accept-range and must
+    fail closed. The bodyless `export filter NAME;` form has no `{`, so it is not
+    matched here (named filters are handled separately). Brace-matched to ignore
+    `bgp_community` that appears elsewhere in the file (e.g. an import filter).
+    """
+    for m in re.finditer(r"export\s+filter\s*\{", text):
+        depth, j = 0, m.end() - 1  # j points at the opening '{'
+        while j < len(text):
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if "bgp_community" in text[m.end() - 1 : j]:
+            return True
+    return False
+
+
 def validate_classes_against_peers(
     classes: Sequence[Tuple[int, int]], peers_dir: Optional[str] = None
 ) -> None:
     """Fail closed unless every export filter used by a peer is compatible with
     the aggregation classes.
 
-    A filter is compatible iff, for each class, its accept-range either fully
-    contains the class or is disjoint from it. A filter whose range only
+    A named filter is compatible iff, for each class, its accept-range either
+    fully contains the class or is disjoint from it. A filter whose range only
     partially overlaps a class (e.g. export_blocked_only 200-299 vs class
     200-399) would still advertise a more-specific that dedup could drop while
-    its covering supernet is filtered out — silent route loss. Unknown filter
-    names are rejected because their range can't be proven. Inline export
-    filters (the t_client default, `export filter { ... }`) export everything
-    and are matched by no name, so they're correctly ignored.
+    its covering supernet is filtered out — silent route loss. Unknown named
+    filters are rejected because their range can't be proven. An inline
+    `export filter { ... }` that references bgp_community is also rejected (same
+    splitting risk, no name to check); a community-free inline filter (the
+    t_client default that exports everything) is safe and ignored.
     """
     if peers_dir is None:
         peers_dir = PEERS_DIR
@@ -408,18 +443,23 @@ def validate_classes_against_peers(
         )
         sys.exit(1)
 
+    problems: List[str] = []
     used: Set[str] = set()
     for fn in sorted(glob.glob(os.path.join(peers_dir, "*.conf"))):
         try:
             with open(fn, "r", encoding="utf-8") as f:
-                text = f.read()
+                text = _strip_bird_comments(f.read())
         except Exception as e:
             print(f"ERROR: cannot read peer config {fn}: {e} (fail-closed).")
             sys.exit(1)
         for m in re.finditer(r"export\s+filter\s+([A-Za-z_][A-Za-z0-9_]*)", text):
             used.add(m.group(1))
+        if _inline_export_filter_uses_community(text):
+            problems.append(
+                f"{os.path.basename(fn)} has an inline export filter using "
+                f"bgp_community (accept-range can't be proven)"
+            )
 
-    problems: List[str] = []
     for name in sorted(used):
         rng = FILTER_RANGES.get(name)
         if rng is None:

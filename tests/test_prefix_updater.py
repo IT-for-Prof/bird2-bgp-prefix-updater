@@ -1,5 +1,6 @@
 import importlib.util
 import ipaddress
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -694,9 +695,37 @@ def test_validate_classes_rejects_unknown_filter(tmp_path: Any) -> None:
         prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
 
 
-def test_validate_classes_ignores_inline_filter(tmp_path: Any) -> None:
-    # Inline filter (template default) exports everything; not name-matched.
-    _write_peer(tmp_path, "tpl", "protocol bgp Z { export filter { reject; }; }")
+def test_validate_classes_ignores_community_free_inline_filter(tmp_path: Any) -> None:
+    # Inline filter that exports everything (no bgp_community) is safe.
+    _write_peer(
+        tmp_path,
+        "tpl",
+        'protocol bgp Z { export filter { if proto = "bgp_prefixes" then '
+        "accept; reject; }; }",
+    )
+    prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
+
+
+def test_validate_classes_rejects_inline_filter_using_community(tmp_path: Any) -> None:
+    # Inline filter that selects on bgp_community can split a class -> fail-closed.
+    _write_peer(
+        tmp_path,
+        "z",
+        "protocol bgp Z { export filter { if bgp_community ~ [(65000, 200..299)] "
+        "then accept; reject; }; }",
+    )
+    with pytest.raises(SystemExit):
+        prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
+
+
+def test_validate_classes_ignores_commented_out_filter(tmp_path: Any) -> None:
+    # A commented-out narrow filter must not trigger a false rejection.
+    _write_peer(
+        tmp_path,
+        "c",
+        "protocol bgp Z {\n  # export filter export_blocked_only;\n"
+        "  export filter export_blocked_lists;\n}",
+    )
     prefix_updater.validate_classes_against_peers([(200, 399)], str(tmp_path))
 
 
@@ -704,4 +733,30 @@ def test_validate_classes_fails_when_peers_dir_missing(tmp_path: Any) -> None:
     with pytest.raises(SystemExit):
         prefix_updater.validate_classes_against_peers(
             [(200, 399)], str(tmp_path / "nope")
+        )
+
+
+def test_dedup_classes_idempotent() -> None:
+    routes = {
+        "10.0.0.0/24": {300},
+        "10.0.0.5/32": {200},
+        "10.0.0.9/32": {384},
+    }
+    prefix_updater.dedup_covered_more_specifics(routes, classes=[(200, 399)])
+    assert (
+        prefix_updater.dedup_covered_more_specifics(routes, classes=[(200, 399)]) == 0
+    )
+
+
+def test_filter_ranges_match_bird_conf() -> None:
+    # Guard against drift: FILTER_RANGES must mirror the accept-ranges in
+    # conf/bird.conf, the single source of truth for those filters.
+    conf = (MODULE_PATH.parents[1] / "conf" / "bird.conf").read_text(encoding="utf-8")
+    for name, (lo, hi) in prefix_updater.FILTER_RANGES.items():
+        m = re.search(
+            rf"filter\s+{name}\b.*?\(MY_AS,\s*(\d+)\.\.(\d+)\)", conf, flags=re.DOTALL
+        )
+        assert m, f"{name}: no '(MY_AS, lo..hi)' accept range found in bird.conf"
+        assert (int(m.group(1)), int(m.group(2))) == (lo, hi), (
+            f"{name}: bird.conf {m.group(1)}..{m.group(2)} != FILTER_RANGES {lo}..{hi}"
         )
