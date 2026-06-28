@@ -210,6 +210,12 @@ SOURCES: List[Source] = [
         "format": "json",
     },
     {
+        "name": "notion_as33191",
+        "url": "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS33191",
+        "community_suffix": 385,
+        "format": "json",
+    },
+    {
         # Cloudflare's FULL announced space (AS13335). The official_services
         # source only carries Cloudflare's published CDN ranges
         # (cloudflare.com/ips-v4, ~15 blocks). AS13335 announces ~2400 prefixes
